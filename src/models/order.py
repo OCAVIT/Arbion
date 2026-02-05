@@ -31,7 +31,10 @@ class Order(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     order_type: Mapped[OrderType] = mapped_column(
-        SQLAlchemyEnum(OrderType),
+        SQLAlchemyEnum(
+            OrderType,
+            values_callable=lambda x: [e.value for e in x],
+        ),
         nullable=False,
         index=True,
     )

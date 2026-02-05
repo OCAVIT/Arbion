@@ -88,7 +88,10 @@ class DetectedDeal(Base, TimestampMixin):
 
     # Status
     status: Mapped[DealStatus] = mapped_column(
-        SQLAlchemyEnum(DealStatus),
+        SQLAlchemyEnum(
+            DealStatus,
+            values_callable=lambda x: [e.value for e in x],
+        ),
         default=DealStatus.COLD,
         nullable=False,
         index=True,

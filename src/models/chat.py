@@ -56,7 +56,10 @@ class MonitoredChat(Base, TimestampMixin):
         nullable=False,
     )
     status: Mapped[ChatStatus] = mapped_column(
-        SQLAlchemyEnum(ChatStatus),
+        SQLAlchemyEnum(
+            ChatStatus,
+            values_callable=lambda x: [e.value for e in x],
+        ),
         default=ChatStatus.PROBATION,
         nullable=False,
     )
@@ -82,7 +85,10 @@ class MonitoredChat(Base, TimestampMixin):
         nullable=False,
     )
     source: Mapped[ChatSource] = mapped_column(
-        SQLAlchemyEnum(ChatSource),
+        SQLAlchemyEnum(
+            ChatSource,
+            values_callable=lambda x: [e.value for e in x],
+        ),
         nullable=False,
     )
     last_checked: Mapped[Optional[datetime]] = mapped_column(

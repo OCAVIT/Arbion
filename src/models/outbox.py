@@ -42,7 +42,10 @@ class OutboxMessage(Base):
         nullable=False,
     )
     status: Mapped[OutboxStatus] = mapped_column(
-        SQLAlchemyEnum(OutboxStatus),
+        SQLAlchemyEnum(
+            OutboxStatus,
+            values_callable=lambda x: [e.value for e in x],
+        ),
         default=OutboxStatus.PENDING,
         nullable=False,
         index=True,

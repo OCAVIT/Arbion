@@ -51,7 +51,10 @@ class Negotiation(Base, TimestampMixin):
         nullable=False,
     )
     stage: Mapped[NegotiationStage] = mapped_column(
-        SQLAlchemyEnum(NegotiationStage),
+        SQLAlchemyEnum(
+            NegotiationStage,
+            values_callable=lambda x: [e.value for e in x],
+        ),
         default=NegotiationStage.INITIAL,
         nullable=False,
     )

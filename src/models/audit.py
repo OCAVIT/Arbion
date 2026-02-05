@@ -50,7 +50,10 @@ class AuditLog(Base):
         index=True,
     )
     action: Mapped[AuditAction] = mapped_column(
-        SQLAlchemyEnum(AuditAction),
+        SQLAlchemyEnum(
+            AuditAction,
+            values_callable=lambda x: [e.value for e in x],
+        ),
         nullable=False,
         index=True,
     )
