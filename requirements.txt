@@ -27,7 +27,7 @@ aiofiles==23.2.1
 # Utilities
 pydantic==2.5.3
 pydantic-settings==2.1.0
-httpx==0.26.0
+httpx==0.24.1
 
 # Scheduler
 apscheduler==3.10.4
