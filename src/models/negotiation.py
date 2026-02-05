@@ -103,10 +103,13 @@ class NegotiationMessage(Base):
         nullable=False,
         index=True,
     )
-    role: Mapped[str] = mapped_column(
-        String(20),
+    role: Mapped[MessageRole] = mapped_column(
+        SQLAlchemyEnum(
+            MessageRole,
+            name="messagerole",
+            values_callable=lambda x: [e.value for e in x],
+        ),
         nullable=False,
-        comment="ai, seller, or manager",
     )
     content: Mapped[str] = mapped_column(
         Text,

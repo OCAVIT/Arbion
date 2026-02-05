@@ -13,6 +13,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field, computed_field
 
 from src.models.deal import DealStatus
+from src.models.negotiation import MessageRole
 from src.utils.masking import generate_contact_ref, mask_sensitive
 
 
@@ -198,11 +199,11 @@ class MessageResponse(BaseModel):
         content = mask_sensitive(message.content, role)
 
         # Determine display name
-        if message.role == "ai":
+        if message.role == MessageRole.AI:
             display_name = "Ассистент"
-        elif message.role == "seller":
+        elif message.role == MessageRole.SELLER:
             display_name = "Продавец"
-        elif message.role == "manager":
+        elif message.role == MessageRole.MANAGER:
             display_name = sender_name or "Менеджер"
         else:
             display_name = "Система"

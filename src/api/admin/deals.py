@@ -17,6 +17,7 @@ from src.models import (
     DealStatus,
     DetectedDeal,
     LedgerEntry,
+    MessageRole,
     Negotiation,
     NegotiationMessage,
     OutboxMessage,
@@ -308,7 +309,7 @@ async def send_message(
     # Add message to history
     message = NegotiationMessage(
         negotiation_id=deal.negotiation.id,
-        role="manager",  # Owner sends as manager role
+        role=MessageRole.MANAGER,  # Owner sends as manager role
         content=data.content,
         sent_by_user_id=current_user.id,
     )

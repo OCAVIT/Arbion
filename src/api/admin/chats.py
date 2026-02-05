@@ -41,7 +41,7 @@ async def list_chats(
     current_user: User = Depends(require_owner),
     status_filter: Optional[str] = Query(None, alias="status"),
     search: Optional[str] = Query(None),
-    sort_by: str = Query("useful_ratio", regex="^(useful_ratio|orders_found|deals_created|joined_at)$"),
+    sort_by: str = Query("useful_ratio", regex="^(useful_ratio|orders_found|deals_created|created_at)$"),
     sort_order: str = Query("desc", regex="^(asc|desc)$"),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),

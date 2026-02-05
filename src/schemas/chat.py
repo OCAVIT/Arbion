@@ -13,7 +13,7 @@ class ChatCreate(BaseModel):
 
     chat_id: int
     title: str = Field(..., max_length=255)
-    source: ChatSource = ChatSource.INVITE_LINK
+    source: ChatSource = ChatSource.MANUAL
 
 
 class ChatUpdate(BaseModel):
@@ -27,15 +27,14 @@ class ChatResponse(BaseModel):
 
     id: int
     chat_id: int
-    title: str
-    member_count: int
-    status: ChatStatus
-    useful_ratio: float
-    orders_found: int
-    deals_created: int
-    joined_at: datetime
+    title: Optional[str] = None
+    username: Optional[str] = None
+    status: Optional[ChatStatus] = None
+    useful_ratio: Optional[float] = 0.0
+    orders_found: int = 0
+    deals_created: int = 0
     source: ChatSource
-    last_checked: Optional[datetime]
+    last_message_at: Optional[datetime] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

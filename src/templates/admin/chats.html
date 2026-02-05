@@ -42,7 +42,7 @@
         <option value="useful_ratio">По полезности</option>
         <option value="orders_found">По заявкам</option>
         <option value="deals_created">По сделкам</option>
-        <option value="joined_at">По дате</option>
+        <option value="created_at">По дате</option>
     </select>
 </div>
 
@@ -60,12 +60,12 @@
         <thead>
             <tr>
                 <th>Название</th>
-                <th>Участников</th>
+                <th>Username</th>
                 <th>Статус</th>
                 <th>Полезность</th>
                 <th>Заявок</th>
                 <th>Сделок</th>
-                <th>Дата вступления</th>
+                <th>Дата</th>
                 <th>Источник</th>
                 <th>Действия</th>
             </tr>
@@ -159,13 +159,13 @@ function renderChats(chats) {
 
     tbody.innerHTML = chats.map(chat => `
         <tr>
-            <td>${escapeHtml(chat.title)}</td>
-            <td>${chat.member_count}</td>
-            <td><span class="badge badge-${chat.status}">${getStatusLabel(chat.status)}</span></td>
-            <td title="Процент полезных сообщений">${chat.useful_ratio.toFixed(1)}%</td>
-            <td>${chat.orders_found}</td>
-            <td>${chat.deals_created}</td>
-            <td>${formatDate(chat.joined_at)}</td>
+            <td>${escapeHtml(chat.title || 'Без названия')}</td>
+            <td>${chat.username ? '@' + chat.username : '-'}</td>
+            <td><span class="badge badge-${chat.status || 'probation'}">${getStatusLabel(chat.status)}</span></td>
+            <td title="Процент полезных сообщений">${(chat.useful_ratio || 0).toFixed(1)}%</td>
+            <td>${chat.orders_found || 0}</td>
+            <td>${chat.deals_created || 0}</td>
+            <td>${formatDate(chat.created_at)}</td>
             <td>${chat.source}</td>
             <td class="actions">
                 ${chat.status !== 'left' ? `<button onclick="leaveChat(${chat.id})" class="btn btn-sm btn-outline">Покинуть</button>` : ''}

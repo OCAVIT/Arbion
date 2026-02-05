@@ -16,6 +16,7 @@ from src.models import (
     DealStatus,
     DetectedDeal,
     LedgerEntry,
+    MessageRole,
     Negotiation,
     NegotiationMessage,
     NegotiationStage,
@@ -185,7 +186,7 @@ async def send_message(
     # Add message to history
     message = NegotiationMessage(
         negotiation_id=negotiation_id,
-        role="manager",
+        role=MessageRole.MANAGER,
         content=data.content,
         sent_by_user_id=current_user.id,
     )

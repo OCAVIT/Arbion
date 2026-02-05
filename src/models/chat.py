@@ -24,8 +24,9 @@ class ChatStatus(str, Enum):
 
 class ChatSource(str, Enum):
     """How the chat was discovered."""
-    SEED = "seed"              # Found via seed search query
-    INVITE_LINK = "invite_link"  # Joined via invite link
+    SEARCH = "search"          # Found via search
+    MANUAL = "manual"          # Manually added
+    INVITE = "invite"          # Joined via invite
 
 
 class MonitoredChat(Base, TimestampMixin):
@@ -46,52 +47,48 @@ class MonitoredChat(Base, TimestampMixin):
         index=True,
         nullable=False,
     )
-    title: Mapped[str] = mapped_column(
+    title: Mapped[Optional[str]] = mapped_column(
         String(255),
-        nullable=False,
+        nullable=True,
     )
-    member_count: Mapped[int] = mapped_column(
-        Integer,
-        default=0,
+    username: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+    source: Mapped[ChatSource] = mapped_column(
+        SQLAlchemyEnum(
+            ChatSource,
+            name="chatsource",
+            values_callable=lambda x: [e.value for e in x],
+        ),
         nullable=False,
     )
     status: Mapped[ChatStatus] = mapped_column(
         SQLAlchemyEnum(
             ChatStatus,
+            name="chatstatus",
             values_callable=lambda x: [e.value for e in x],
         ),
         default=ChatStatus.PROBATION,
-        nullable=False,
+        nullable=True,
     )
-    useful_ratio: Mapped[float] = mapped_column(
+    useful_ratio: Mapped[Optional[float]] = mapped_column(
         Float,
         default=0.0,
-        nullable=False,
+        nullable=True,
         comment="Percentage of messages that passed pre_filter",
     )
     orders_found: Mapped[int] = mapped_column(
         Integer,
         default=0,
-        nullable=False,
+        nullable=True,
     )
     deals_created: Mapped[int] = mapped_column(
         Integer,
         default=0,
-        nullable=False,
+        nullable=True,
     )
-    joined_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
-    source: Mapped[ChatSource] = mapped_column(
-        SQLAlchemyEnum(
-            ChatSource,
-            values_callable=lambda x: [e.value for e in x],
-        ),
-        nullable=False,
-    )
-    last_checked: Mapped[Optional[datetime]] = mapped_column(
+    last_message_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
