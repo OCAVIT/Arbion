@@ -13,11 +13,16 @@ import re
 from decimal import Decimal
 from typing import Optional, Tuple
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import selectinload
 
 from src.db import get_db_context
-from src.models import DetectedDeal, DealStatus, Order, OrderType, RawMessage
+from src.models import (
+    DetectedDeal, DealStatus, Negotiation, NegotiationStage,
+    Order, OrderType, RawMessage
+)
+from src.services.ai_negotiator import initiate_negotiation, process_seller_response
 
 logger = logging.getLogger(__name__)
 
@@ -229,6 +234,50 @@ async def try_match_orders(db, new_order: Order) -> Optional[DetectedDeal]:
     return None
 
 
+async def check_negotiation_response(db, sender_id: int, message_text: str) -> bool:
+    """
+    Check if incoming message is a response to an active negotiation.
+    If so, process it with AI negotiator.
+
+    Args:
+        db: Database session
+        sender_id: Telegram sender ID
+        message_text: Message text
+
+    Returns:
+        True if message was a negotiation response
+    """
+    if not sender_id:
+        return False
+
+    # Find active negotiation with this seller
+    result = await db.execute(
+        select(Negotiation)
+        .options(selectinload(Negotiation.deal))
+        .where(
+            and_(
+                or_(
+                    Negotiation.seller_sender_id == sender_id,
+                    Negotiation.seller_chat_id == sender_id,
+                ),
+                Negotiation.stage.in_([
+                    NegotiationStage.INITIAL,
+                    NegotiationStage.CONTACTED,
+                    NegotiationStage.NEGOTIATING,
+                ]),
+            )
+        )
+    )
+    negotiation = result.scalar_one_or_none()
+
+    if negotiation:
+        logger.info(f"Found active negotiation {negotiation.id} for sender {sender_id}")
+        await process_seller_response(negotiation, message_text, db)
+        return True
+
+    return False
+
+
 async def handle_new_message(event, telegram_service) -> None:
     """
     Handle incoming Telegram message.
@@ -314,6 +363,11 @@ async def handle_new_message(event, telegram_service) -> None:
                     deal = await try_match_orders(db, order)
                     if deal:
                         logger.info(f"Auto-matched into deal #{deal.id}")
+                        # Start AI negotiation for new deal
+                        await initiate_negotiation(deal, db)
+
+            # Check if this is a response to an active negotiation
+            await check_negotiation_response(db, sender_id, raw_text)
 
             # Mark raw message as processed
             result = await db.execute(

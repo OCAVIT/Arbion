@@ -27,6 +27,7 @@ from src.config import settings
 from src.db import AsyncSessionLocal, get_db_context
 from src.models import SystemSetting, User, UserRole
 from src.services.message_handler import handle_new_message
+from src.services.outbox_worker import run_outbox_worker
 from src.services.telegram_client import init_telegram_service, get_telegram_service
 from src.utils.password import hash_password
 
@@ -131,26 +132,34 @@ async def lifespan(app: FastAPI):
             # Run Telegram client in background
             telegram_task = asyncio.create_task(telegram.run_until_disconnected())
             logger.info("Telegram client started in background")
+
+            # Start outbox worker for sending messages
+            outbox_task = asyncio.create_task(run_outbox_worker(interval_seconds=5))
+            logger.info("Outbox worker started")
         else:
             logger.warning("Telegram client not initialized (missing credentials?)")
+            outbox_task = None
     except Exception as e:
         logger.error(f"Failed to start Telegram client: {e}")
+        outbox_task = None
 
     yield
 
     # Shutdown
     logger.info("Shutting down Arbion...")
 
-    # Stop Telegram client
+    # Stop background tasks
     telegram = get_telegram_service()
     if telegram:
         await telegram.stop()
-    if telegram_task:
-        telegram_task.cancel()
-        try:
-            await telegram_task
-        except asyncio.CancelledError:
-            pass
+
+    for task in [telegram_task, outbox_task]:
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 # Create FastAPI application
