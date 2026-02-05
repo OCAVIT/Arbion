@@ -49,19 +49,6 @@ async def managers_page(
     )
 
 
-@router.get("/{manager_id}", response_class=HTMLResponse, include_in_schema=False)
-async def manager_detail_page(
-    request: Request,
-    manager_id: int,
-    current_user: User = Depends(require_owner),
-):
-    """Render manager detail page."""
-    return templates.TemplateResponse(
-        "admin/manager_detail.html",
-        {"request": request, "user": current_user, "manager_id": manager_id},
-    )
-
-
 @router.get("/list")
 async def list_managers(
     db: AsyncSession = Depends(get_db),
@@ -500,3 +487,18 @@ async def regenerate_manager_token(
 
     await db.commit()
     return {"success": True, "invite_token": manager.invite_token}
+
+
+# IMPORTANT: This route MUST be after all other /{manager_id}/... routes
+# to avoid "data", "stats", "audit", etc. being interpreted as manager_id
+@router.get("/{manager_id}", response_class=HTMLResponse, include_in_schema=False)
+async def manager_detail_page(
+    request: Request,
+    manager_id: int,
+    current_user: User = Depends(require_owner),
+):
+    """Render manager detail page."""
+    return templates.TemplateResponse(
+        "admin/manager_detail.html",
+        {"request": request, "user": current_user, "manager_id": manager_id},
+    )

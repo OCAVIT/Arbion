@@ -49,19 +49,6 @@ async def deals_page(
     )
 
 
-@router.get("/{deal_id}", response_class=HTMLResponse, include_in_schema=False)
-async def deal_detail_page(
-    request: Request,
-    deal_id: int,
-    current_user: User = Depends(require_owner),
-):
-    """Render deal detail page."""
-    return templates.TemplateResponse(
-        "admin/deal_detail.html",
-        {"request": request, "user": current_user, "deal_id": deal_id},
-    )
-
-
 @router.get("/list", response_model=DealListResponse)
 async def list_deals(
     db: AsyncSession = Depends(get_db),
@@ -76,6 +63,7 @@ async def list_deals(
     query = select(DetectedDeal).options(
         selectinload(DetectedDeal.manager),
         selectinload(DetectedDeal.negotiation),
+        selectinload(DetectedDeal.sell_order),
     )
 
     # Apply filters
@@ -394,3 +382,18 @@ async def close_deal(
 
     await db.commit()
     return {"success": True}
+
+
+# IMPORTANT: This route MUST be after all other /{deal_id}/... routes
+# to avoid "data", "messages", etc. being interpreted as deal_id
+@router.get("/{deal_id}", response_class=HTMLResponse, include_in_schema=False)
+async def deal_detail_page(
+    request: Request,
+    deal_id: int,
+    current_user: User = Depends(require_owner),
+):
+    """Render deal detail page."""
+    return templates.TemplateResponse(
+        "admin/deal_detail.html",
+        {"request": request, "user": current_user, "deal_id": deal_id},
+    )
