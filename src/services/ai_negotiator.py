@@ -383,6 +383,12 @@ async def initiate_negotiation(deal: DetectedDeal, db: AsyncSession) -> Optional
         db.add(negotiation)
         await db.flush()
 
+        logger.info(
+            f"Созданы переговоры #{negotiation.id} для сделки #{deal.id}: "
+            f"seller_sender_id={seller_sender_id}, seller_chat_id={seller_chat_id}, "
+            f"buyer_sender_id={deal.buyer_sender_id}, buyer_chat_id={deal.buyer_chat_id}"
+        )
+
         # Генерируем первое сообщение продавцу
         seller_message = generate_response('initial_seller', deal.product)
 
@@ -451,6 +457,8 @@ async def process_seller_response(
     Обработка ответа продавца с умной логикой ведения диалога.
     """
     try:
+        logger.info(f"Обработка ответа продавца для переговоров #{negotiation.id}: '{response_text[:50]}...'")
+
         # Сохраняем сообщение продавца
         seller_msg = NegotiationMessage(
             negotiation_id=negotiation.id,
@@ -460,6 +468,7 @@ async def process_seller_response(
         )
         db.add(seller_msg)
         await db.flush()
+        logger.info(f"Сообщение продавца #{seller_msg.id} сохранено в историю")
 
         # Получаем контекст разговора
         context = await get_conversation_context(negotiation, db, MessageTarget.SELLER)
@@ -561,6 +570,8 @@ async def process_buyer_response(
     Обработка ответа покупателя.
     """
     try:
+        logger.info(f"Обработка ответа покупателя для переговоров #{negotiation.id}: '{response_text[:50]}...'")
+
         # Сохраняем сообщение покупателя
         buyer_msg = NegotiationMessage(
             negotiation_id=negotiation.id,
@@ -570,6 +581,7 @@ async def process_buyer_response(
         )
         db.add(buyer_msg)
         await db.flush()
+        logger.info(f"Сообщение покупателя #{buyer_msg.id} сохранено в историю")
 
         # Получаем контекст разговора с покупателем
         context = await get_conversation_context(negotiation, db, MessageTarget.BUYER)

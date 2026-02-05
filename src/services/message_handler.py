@@ -446,8 +446,9 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
         return False
 
     try:
+        logger.debug(f"Проверяем переговоры для sender_id={sender_id}")
+
         # Проверяем, является ли это ответом ПРОДАВЦА
-        # Используем только стадии, которые не закрыты (не 'closed')
         result = await db.execute(
             select(Negotiation)
             .options(selectinload(Negotiation.deal))
@@ -457,8 +458,6 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
                         Negotiation.seller_sender_id == sender_id,
                         Negotiation.seller_chat_id == sender_id,
                     ),
-                    # Не используем .in_() с enum'ами которых может не быть в БД
-                    # Вместо этого исключаем только 'closed'
                     Negotiation.stage != NegotiationStage.CLOSED,
                 )
             )
@@ -492,12 +491,12 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
             await process_buyer_response(negotiation, message_text, db)
             return True
 
+        logger.debug(f"Переговоры для sender_id={sender_id} не найдены")
         return False
 
     except Exception as e:
         # Если ошибка с enum или БД - логируем и возвращаем False
-        # чтобы сообщение обработалось как новая заявка
-        logger.warning(f"Ошибка при проверке переговоров: {e}")
+        logger.warning(f"Ошибка при проверке переговоров: {e}", exc_info=True)
         return False
 
 
