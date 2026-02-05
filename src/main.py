@@ -12,6 +12,8 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
+import subprocess
+
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -27,6 +29,27 @@ from src.models import SystemSetting, User, UserRole
 from src.services.message_handler import handle_new_message
 from src.services.telegram_client import init_telegram_service, get_telegram_service
 from src.utils.password import hash_password
+
+
+def run_migrations():
+    """Run database migrations on startup via subprocess."""
+    try:
+        result = subprocess.run(
+            ["alembic", "upgrade", "head"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            logging.error(f"Migration failed: {result.stderr}")
+            raise RuntimeError(f"Migration failed: {result.stderr}")
+        if result.stdout:
+            logging.info(f"Migration output: {result.stdout}")
+    except FileNotFoundError:
+        logging.warning("Alembic CLI not found, skipping migrations")
+    except subprocess.TimeoutExpired:
+        logging.error("Migration timed out")
+        raise
 
 # Configure logging
 logging.basicConfig(
@@ -49,6 +72,11 @@ async def lifespan(app: FastAPI):
     - Cleanup tasks
     """
     logger.info("Starting Arbion...")
+
+    # Run database migrations
+    logger.info("Running database migrations...")
+    run_migrations()
+    logger.info("Migrations completed")
 
     async with get_db_context() as db:
         # Create owner account if not exists
