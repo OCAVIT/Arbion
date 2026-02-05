@@ -378,9 +378,10 @@ async def handle_new_message(event, telegram_service) -> None:
                         logger.info(f"Auto-matched into deal #{deal.id}")
                         # Start AI negotiation for new deal
                         await initiate_negotiation(deal, db)
-
-            # Check if this is a response to an active negotiation
-            await check_negotiation_response(db, sender_id, raw_text)
+            else:
+                # Only check for negotiation response if this wasn't a new order
+                # (to avoid treating the order message as a response)
+                await check_negotiation_response(db, sender_id, raw_text)
 
             # Mark raw message as processed
             result = await db.execute(

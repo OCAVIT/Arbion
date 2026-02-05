@@ -29,39 +29,47 @@ from src.models import (
 
 logger = logging.getLogger(__name__)
 
-# Initial contact templates - casual, human-like
-INITIAL_TEMPLATES = [
-    "привет) {product} ещё есть?",
+# Initial contact templates for SELLER - casual but normal
+INITIAL_SELLER_TEMPLATES = [
+    "привет, {product} ещё есть?",
     "здравствуйте, {product} актуально?",
-    "добрый день! увидел объявление, {product} продаёте ещё?",
-    "о, {product}! ещё в продаже?",
-    "хай, по {product} актуально?",
-    "прив! {product} есть в наличии?",
-    "здрасте) по поводу {product} - актуально?",
+    "добрый день, {product} продаёте ещё?",
+    "привет! по {product} - актуально?",
+    "здравствуйте, интересует {product}, ещё в продаже?",
+    "добрый день! {product} ещё есть?",
+]
+
+# Initial contact templates for BUYER
+INITIAL_BUYER_TEMPLATES = [
+    "привет, нашёл {product} по твоему запросу, интересно?",
+    "здравствуйте, есть {product} - актуально для вас?",
+    "добрый день! по вашему запросу - есть {product}, интересует?",
+    "привет! нашёл {product}, ещё ищете?",
+    "здравствуйте, {product} в наличии - подойдёт?",
 ]
 
 # Follow-up templates based on seller response
 FOLLOWUP_INTERESTED = [
-    "о круто! а состояние какое? есть косяки?",
-    "супер) что по состоянию? комплект полный?",
-    "отлично! а чё с состоянием? всё работает?",
-    "класс, подскажи по состоянию плиз",
-    "хорошо! а что по внешке? царапины есть?",
+    "отлично! а состояние какое? есть косяки?",
+    "хорошо, что по состоянию? комплект полный?",
+    "понял, а состояние нормальное? всё работает?",
+    "ок, подскажи по состоянию",
+    "хорошо, а по внешке как? царапины есть?",
 ]
 
 FOLLOWUP_PRICE_CHECK = [
-    "понял, а по цене можно чуть подвинуться? готов сегодня забрать",
-    "ясно) если скинешь немного - сразу заберу",
-    "хм, а торг будет? могу подъехать сегодня",
-    "а если чуть дешевле - возьму прям щас",
-    "окей, по цене договоримся? я быстро заберу",
+    "понял, а по цене можно подвинуться? готов сегодня забрать",
+    "ясно, если скинешь немного - сразу заберу",
+    "а торг будет? могу подъехать сегодня",
+    "а если чуть дешевле - возьму сейчас",
+    "по цене договоримся? заберу быстро",
 ]
 
 # Clarification templates
 FOLLOWUP_UNCLEAR = [
-    "хм, не совсем понял) так продаёшь ещё?",
-    "а можно подробнее? интересует покупка",
-    "так актуально или нет?)",
+    "не совсем понял, так продаёшь ещё?",
+    "можно подробнее? интересует покупка",
+    "так актуально или нет?",
 ]
 
 # Keywords that indicate seller interest
@@ -115,7 +123,7 @@ def generate_response(stage: str, product: str, context: str = "") -> str:
     Generate AI response based on negotiation stage.
 
     Args:
-        stage: Current stage ('initial', 'positive', 'price', 'unclear')
+        stage: Current stage ('initial_seller', 'initial_buyer', 'positive', 'price', 'unclear')
         product: Product name
         context: Previous conversation context
 
@@ -124,10 +132,15 @@ def generate_response(stage: str, product: str, context: str = "") -> str:
     """
     import random
 
-    if stage == 'initial':
-        template = random.choice(INITIAL_TEMPLATES)
-        # Make product name lowercase for casual feel
-        product_lower = product.lower() if product else "товар"
+    # Make product name lowercase for casual feel
+    product_lower = product.lower() if product else "товар"
+
+    if stage == 'initial' or stage == 'initial_seller':
+        template = random.choice(INITIAL_SELLER_TEMPLATES)
+        return template.format(product=product_lower)
+
+    elif stage == 'initial_buyer':
+        template = random.choice(INITIAL_BUYER_TEMPLATES)
         return template.format(product=product_lower)
 
     elif stage == 'positive':
@@ -194,31 +207,57 @@ async def initiate_negotiation(deal: DetectedDeal, db: AsyncSession) -> Optional
         db.add(negotiation)
         await db.flush()
 
-        # Generate initial message
-        initial_message = generate_response('initial', deal.product)
+        # Generate initial message for SELLER
+        seller_message = generate_response('initial_seller', deal.product)
 
         # Save message to history
         msg = NegotiationMessage(
             negotiation_id=negotiation.id,
             role=MessageRole.AI,
-            content=initial_message,
+            content=f"[К продавцу] {seller_message}",
         )
         db.add(msg)
 
-        # Queue message for sending
-        outbox = OutboxMessage(
+        # Queue message for sending to SELLER
+        outbox_seller = OutboxMessage(
             recipient_id=seller_sender_id or seller_chat_id,
-            message_text=initial_message,
+            message_text=seller_message,
             status=OutboxStatus.PENDING,
             negotiation_id=negotiation.id,
         )
-        db.add(outbox)
+        db.add(outbox_seller)
+
+        # Also contact the BUYER
+        buyer_sender_id = deal.buyer_sender_id
+        buyer_chat_id = deal.buyer_chat_id
+
+        if buyer_sender_id or buyer_chat_id:
+            buyer_message = generate_response('initial_buyer', deal.product)
+
+            # Save buyer message to history
+            buyer_msg = NegotiationMessage(
+                negotiation_id=negotiation.id,
+                role=MessageRole.AI,
+                content=f"[К покупателю] {buyer_message}",
+            )
+            db.add(buyer_msg)
+
+            # Queue message for sending to BUYER
+            outbox_buyer = OutboxMessage(
+                recipient_id=buyer_sender_id or buyer_chat_id,
+                message_text=buyer_message,
+                status=OutboxStatus.PENDING,
+                negotiation_id=negotiation.id,
+            )
+            db.add(outbox_buyer)
+            logger.info(f"Deal {deal.id}: messages queued for both seller and buyer")
+        else:
+            logger.info(f"Deal {deal.id}: message queued for seller only (no buyer contact info)")
 
         # Update deal status
         deal.status = DealStatus.IN_PROGRESS
 
         # Note: commit is handled by the caller (handle_new_message)
-        logger.info(f"Initiated negotiation for deal {deal.id}, message queued")
         return negotiation
 
     except Exception as e:
