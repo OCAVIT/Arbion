@@ -22,19 +22,9 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = Field(
-        default="postgresql+asyncpg://user:pass@localhost:5432/arbion",
+        default="postgresql+asyncpg://postgres:eehVvqlgriwncHLOlughMeacVrySHtTj@postgres-4l-w.railway.internal:5432/railway",
         description="PostgreSQL connection string (async)"
     )
-
-    @field_validator("database_url", mode="before")
-    @classmethod
-    def convert_database_url(cls, v: str) -> str:
-        """Convert standard postgres URL to asyncpg format."""
-        if v.startswith("postgres://"):
-            v = v.replace("postgres://", "postgresql+asyncpg://", 1)
-        elif v.startswith("postgresql://") and "+asyncpg" not in v:
-            v = v.replace("postgresql://", "postgresql+asyncpg://", 1)
-        return v
 
     # Authentication
     secret_key: str = Field(
