@@ -3,8 +3,9 @@ Message handler for incoming Telegram messages.
 
 Handles:
 - Saving raw messages to database
-- Parsing buy/sell patterns
+- Parsing buy/sell patterns with product, price, region extraction
 - Creating orders from detected patterns
+- Matching buy/sell orders to create deals
 """
 
 import logging
@@ -12,99 +13,220 @@ import re
 from decimal import Decimal
 from typing import Optional, Tuple
 
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert
 
 from src.db import get_db_context
-from src.models import Order, OrderType, RawMessage
+from src.models import DetectedDeal, DealStatus, Order, OrderType, RawMessage
 
 logger = logging.getLogger(__name__)
 
 # Patterns for detecting buy/sell intent
-BUY_PATTERNS = [
-    r'\b(куплю|покупаю|ищу|нужен|нужна|нужно|приму|возьму)\b',
+BUY_KEYWORDS = [
+    'куплю', 'покупаю', 'ищу', 'нужен', 'нужна', 'нужно',
+    'приму', 'возьму', 'куплю срочно', 'ищу срочно'
 ]
-SELL_PATTERNS = [
-    r'\b(продам|продаю|отдам|есть в наличии|в наличии|готов продать)\b',
+SELL_KEYWORDS = [
+    'продам', 'продаю', 'отдам', 'есть в наличии', 'в наличии',
+    'готов продать', 'продам срочно', 'срочно продам'
 ]
 
-# Price pattern: matches numbers with optional currency
-PRICE_PATTERN = r'(\d[\d\s]*(?:[.,]\d+)?)\s*(?:руб|р|₽|\$|usd|грн|€|euro)?'
+# Known product patterns (common electronics, etc.)
+PRODUCT_PATTERNS = [
+    r'(iphone\s*\d+\s*(?:pro\s*)?(?:max)?)',
+    r'(айфон\s*\d+\s*(?:про\s*)?(?:макс)?)',
+    r'(samsung\s*(?:galaxy\s*)?[sa]\d+\s*(?:ultra)?)',
+    r'(самсунг\s*(?:галакси\s*)?[sa]\d+\s*(?:ультра)?)',
+    r'(macbook\s*(?:air|pro)?\s*(?:m\d)?)',
+    r'(макбук\s*(?:эйр|про)?\s*(?:м\d)?)',
+    r'(ipad\s*(?:air|pro|mini)?)',
+    r'(airpods\s*(?:pro|max)?)',
+    r'(playstation\s*\d+|ps\s*\d+)',
+    r'(xbox\s*(?:series\s*)?[xs]?)',
+    r'(nintendo\s*switch)',
+]
+
+# Price patterns - more specific to avoid matching model numbers
+PRICE_PATTERNS = [
+    r'(?:цена|за|стоит|стоимость|прошу|отдам за|продам за)[:\s]*(\d[\d\s]*(?:[.,]\d+)?)\s*(?:т\.?р\.?|тыс\.?|к|руб|р|₽|\$)?',
+    r'(\d[\d\s]*(?:[.,]\d+)?)\s*(?:т\.?р\.?|тыс\.?|тысяч|к)\b',
+    r'(\d{2,}[\d\s]*(?:[.,]\d+)?)\s*(?:руб|р|₽)\b',
+]
+
+# Region patterns
+REGIONS = [
+    'москва', 'мск', 'питер', 'спб', 'санкт-петербург', 'петербург',
+    'новосибирск', 'екатеринбург', 'казань', 'нижний новгород',
+    'челябинск', 'самара', 'омск', 'ростов', 'уфа', 'красноярск',
+    'пермь', 'воронеж', 'волгоград', 'краснодар', 'саратов',
+    'тюмень', 'тольятти', 'ижевск', 'барнаул', 'ульяновск',
+    'иркутск', 'хабаровск', 'ярославль', 'владивосток', 'махачкала',
+    'томск', 'оренбург', 'кемерово', 'новокузнецк', 'рязань',
+]
+
+# Normalize region names
+REGION_NORMALIZE = {
+    'мск': 'Москва',
+    'москва': 'Москва',
+    'спб': 'Санкт-Петербург',
+    'питер': 'Санкт-Петербург',
+    'санкт-петербург': 'Санкт-Петербург',
+    'петербург': 'Санкт-Петербург',
+}
 
 
 def detect_order_type(text: str) -> Optional[OrderType]:
-    """
-    Detect if message is a buy or sell order.
-
-    Args:
-        text: Message text to analyze
-
-    Returns:
-        OrderType.BUY, OrderType.SELL, or None if not detected
-    """
+    """Detect if message is a buy or sell order."""
     text_lower = text.lower()
 
-    for pattern in BUY_PATTERNS:
-        if re.search(pattern, text_lower):
+    for keyword in BUY_KEYWORDS:
+        if keyword in text_lower:
             return OrderType.BUY
 
-    for pattern in SELL_PATTERNS:
-        if re.search(pattern, text_lower):
+    for keyword in SELL_KEYWORDS:
+        if keyword in text_lower:
             return OrderType.SELL
 
     return None
 
 
-def extract_price(text: str) -> Optional[Decimal]:
+def extract_product(text: str) -> str:
     """
-    Extract price from message text.
-
-    Args:
-        text: Message text
-
-    Returns:
-        Decimal price or None if not found
-    """
-    match = re.search(PRICE_PATTERN, text.lower())
-    if match:
-        try:
-            price_str = match.group(1).replace(' ', '').replace(',', '.')
-            return Decimal(price_str)
-        except Exception:
-            pass
-    return None
-
-
-def extract_product(text: str, order_type: OrderType) -> str:
-    """
-    Extract product name from message.
-
-    Simple heuristic: take the text after the buy/sell keyword.
-
-    Args:
-        text: Message text
-        order_type: Detected order type
-
-    Returns:
-        Product name or cleaned text
+    Extract product name using known patterns.
+    Falls back to extracting text near buy/sell keyword.
     """
     text_lower = text.lower()
 
-    # Patterns to remove
-    patterns = BUY_PATTERNS if order_type == OrderType.BUY else SELL_PATTERNS
+    # Try known product patterns first
+    for pattern in PRODUCT_PATTERNS:
+        match = re.search(pattern, text_lower, re.IGNORECASE)
+        if match:
+            product = match.group(1).strip()
+            # Capitalize properly
+            return product.title().replace('Iphone', 'iPhone').replace('Macbook', 'MacBook').replace('Ipad', 'iPad').replace('Airpods', 'AirPods')
 
-    result = text
-    for pattern in patterns:
-        result = re.sub(pattern, '', result, flags=re.IGNORECASE)
+    # Fallback: extract text after buy/sell keyword
+    all_keywords = BUY_KEYWORDS + SELL_KEYWORDS
+    for keyword in all_keywords:
+        if keyword in text_lower:
+            idx = text_lower.find(keyword)
+            after_keyword = text[idx + len(keyword):].strip()
+            # Take first meaningful chunk (up to comma, newline, or price mention)
+            chunk = re.split(r'[,\n]|(?:\d+\s*(?:т\.?р|тыс|к|руб|р|₽))', after_keyword)[0].strip()
+            if chunk and len(chunk) > 3:
+                # Clean up
+                chunk = re.sub(r'^[!.\s]+', '', chunk)
+                chunk = chunk[:100]  # Limit length
+                return chunk if chunk else "Товар"
 
-    # Clean up
-    result = re.sub(r'\s+', ' ', result).strip()
+    return "Товар"
 
-    # Limit length
-    if len(result) > 200:
-        result = result[:200]
 
-    return result if result else text[:200]
+def extract_price(text: str) -> Optional[Decimal]:
+    """
+    Extract price from message text.
+    Handles formats like: 100к, 100 тыс, 100000 руб, цена 100к
+    """
+    text_lower = text.lower()
+
+    for pattern in PRICE_PATTERNS:
+        match = re.search(pattern, text_lower)
+        if match:
+            try:
+                price_str = match.group(1).replace(' ', '').replace(',', '.')
+                price = Decimal(price_str)
+
+                # Check if followed by 'к' or 'тыс' multiplier
+                full_match = match.group(0).lower()
+                if any(m in full_match for m in ['к', 'тыс', 'т.р', 'тр']):
+                    price *= 1000
+
+                # Sanity check - prices usually between 1000 and 10000000
+                if 1000 <= price <= 10000000:
+                    return price
+            except Exception:
+                pass
+
+    return None
+
+
+def extract_region(text: str) -> Optional[str]:
+    """Extract region/city from message text."""
+    text_lower = text.lower()
+
+    for region in REGIONS:
+        if region in text_lower:
+            # Return normalized name if available
+            return REGION_NORMALIZE.get(region, region.title())
+
+    return None
+
+
+async def try_match_orders(db, new_order: Order) -> Optional[DetectedDeal]:
+    """
+    Try to match a new order with existing opposite orders.
+    Buy order matches with Sell orders and vice versa.
+    """
+    opposite_type = OrderType.SELL if new_order.order_type == OrderType.BUY else OrderType.BUY
+
+    # Find matching orders by product similarity
+    # Simple approach: exact product match or similar
+    product_lower = new_order.product.lower() if new_order.product else ""
+
+    # Get active opposite orders
+    result = await db.execute(
+        select(Order).where(
+            and_(
+                Order.order_type == opposite_type,
+                Order.is_active == True,
+                Order.id != new_order.id,
+            )
+        ).order_by(Order.created_at.desc()).limit(50)
+    )
+    candidates = result.scalars().all()
+
+    for candidate in candidates:
+        candidate_product = (candidate.product or "").lower()
+
+        # Check if products match (simple substring match for now)
+        # In production, use embeddings/vector similarity
+        if product_lower and candidate_product:
+            # Check for common product keywords
+            keywords = ['iphone', 'samsung', 'macbook', 'ipad', 'airpods', 'playstation', 'xbox']
+            for kw in keywords:
+                if kw in product_lower and kw in candidate_product:
+                    # Found a match!
+                    buy_order = new_order if new_order.order_type == OrderType.BUY else candidate
+                    sell_order = candidate if new_order.order_type == OrderType.BUY else new_order
+
+                    # Calculate prices and margin
+                    buy_price = buy_order.price or Decimal('0')
+                    sell_price = sell_order.price or Decimal('0')
+                    margin = buy_price - sell_price if buy_price and sell_price else Decimal('0')
+
+                    # Create deal
+                    deal = DetectedDeal(
+                        buy_order_id=buy_order.id,
+                        sell_order_id=sell_order.id,
+                        product=buy_order.product or sell_order.product or "Товар",
+                        region=buy_order.region or sell_order.region,
+                        buy_price=buy_price,
+                        sell_price=sell_price,
+                        margin=margin,
+                        status=DealStatus.COLD,
+                        buyer_chat_id=buy_order.chat_id,
+                        buyer_sender_id=buy_order.sender_id,
+                    )
+                    db.add(deal)
+
+                    # Mark orders as matched (deactivate)
+                    buy_order.is_active = False
+                    sell_order.is_active = False
+
+                    logger.info(f"Created deal: {deal.product} (margin: {margin})")
+                    return deal
+
+    return None
 
 
 async def handle_new_message(event, telegram_service) -> None:
@@ -153,9 +275,12 @@ async def handle_new_message(event, telegram_service) -> None:
             order_type = detect_order_type(raw_text)
 
             if order_type:
-                # Extract product and price
-                product = extract_product(raw_text, order_type)
+                # Extract product, price, and region
+                product = extract_product(raw_text)
                 price = extract_price(raw_text)
+                region = extract_region(raw_text)
+
+                logger.info(f"Parsed: type={order_type.value}, product={product}, price={price}, region={region}")
 
                 # Check if order already exists
                 existing = await db.execute(
@@ -173,15 +298,22 @@ async def handle_new_message(event, telegram_service) -> None:
                         message_id=message_id,
                         product=product,
                         price=price,
+                        region=region,
                         raw_text=raw_text,
                         is_active=True,
                     )
                     db.add(order)
+                    await db.flush()  # Get order ID
 
                     logger.info(
-                        f"Created {order_type.value} order: {product[:50]} "
-                        f"(price: {price}, chat: {chat_id})"
+                        f"Created {order_type.value} order #{order.id}: {product} "
+                        f"(price: {price}, region: {region})"
                     )
+
+                    # Try to match with opposite orders
+                    deal = await try_match_orders(db, order)
+                    if deal:
+                        logger.info(f"Auto-matched into deal #{deal.id}")
 
             # Mark raw message as processed
             result = await db.execute(
