@@ -32,8 +32,18 @@ class TelegramService:
 
     def __init__(self):
         """Initialize the Telegram client."""
+        logger.info(f"Initializing Telegram client...")
+        logger.info(f"TG_API_ID configured: {bool(settings.tg_api_id)}")
+        logger.info(f"TG_API_HASH configured: {bool(settings.tg_api_hash)}")
+        logger.info(f"TG_SESSION_STRING configured: {bool(settings.tg_session_string)}")
+
         if not settings.tg_session_string:
             logger.warning("TG_SESSION_STRING not configured, Telegram will be disabled")
+            self.client = None
+            return
+
+        if not settings.tg_api_id or not settings.tg_api_hash:
+            logger.warning("TG_API_ID or TG_API_HASH not configured, Telegram will be disabled")
             self.client = None
             return
 
@@ -44,6 +54,7 @@ class TelegramService:
         )
         self.me = None
         self._message_handlers = []
+        logger.info("Telegram client initialized successfully")
 
     async def start(self):
         """Start the Telegram client and authenticate."""

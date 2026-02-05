@@ -8,6 +8,7 @@ Main FastAPI application with:
 - Telegram integration via Telethon
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -23,6 +24,8 @@ from src.auth.middleware import AuthMiddleware
 from src.config import settings
 from src.db import AsyncSessionLocal, get_db_context
 from src.models import SystemSetting, User, UserRole
+from src.services.message_handler import handle_new_message
+from src.services.telegram_client import init_telegram_service, get_telegram_service
 from src.utils.password import hash_password
 
 # Configure logging
@@ -88,10 +91,38 @@ async def lifespan(app: FastAPI):
 
     logger.info("Arbion started successfully!")
 
+    # Initialize Telegram client
+    telegram_task = None
+    try:
+        telegram = await init_telegram_service()
+        if telegram and telegram.client:
+            # Register message handler
+            telegram.on_new_message(handle_new_message)
+            logger.info("Telegram message handler registered")
+
+            # Run Telegram client in background
+            telegram_task = asyncio.create_task(telegram.run_until_disconnected())
+            logger.info("Telegram client started in background")
+        else:
+            logger.warning("Telegram client not initialized (missing credentials?)")
+    except Exception as e:
+        logger.error(f"Failed to start Telegram client: {e}")
+
     yield
 
     # Shutdown
     logger.info("Shutting down Arbion...")
+
+    # Stop Telegram client
+    telegram = get_telegram_service()
+    if telegram:
+        await telegram.stop()
+    if telegram_task:
+        telegram_task.cancel()
+        try:
+            await telegram_task
+        except asyncio.CancelledError:
+            pass
 
 
 # Create FastAPI application
