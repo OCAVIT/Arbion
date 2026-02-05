@@ -195,15 +195,13 @@ async def initiate_negotiation(deal: DetectedDeal, db: AsyncSession) -> Optional
         # Update deal status
         deal.status = DealStatus.IN_PROGRESS
 
-        await db.commit()
-
+        # Note: commit is handled by the caller (handle_new_message)
         logger.info(f"Initiated negotiation for deal {deal.id}, message queued")
         return negotiation
 
     except Exception as e:
         logger.error(f"Failed to initiate negotiation for deal {deal.id}: {e}")
-        await db.rollback()
-        return None
+        raise  # Let caller handle transaction rollback
 
 
 async def process_seller_response(
@@ -312,11 +310,17 @@ async def process_cold_deals(db: AsyncSession) -> int:
 
     initiated = 0
     for deal in cold_deals:
-        negotiation = await initiate_negotiation(deal, db)
-        if negotiation:
-            initiated += 1
+        try:
+            negotiation = await initiate_negotiation(deal, db)
+            if negotiation:
+                initiated += 1
+        except Exception as e:
+            logger.error(f"Failed to initiate negotiation for deal {deal.id}: {e}")
+            await db.rollback()
+            continue
 
     if initiated > 0:
+        await db.commit()
         logger.info(f"Initiated {initiated} new negotiations")
 
     return initiated

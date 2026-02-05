@@ -796,12 +796,14 @@ textarea:focus {
     word-break: break-word;
 }
 
-.chat-input-area {
+.chat-input-area,
+.chat-input {
     display: flex;
     gap: 12px;
 }
 
-.chat-input-area input {
+.chat-input-area input,
+.chat-input input {
     flex: 1;
 }
 
@@ -1441,8 +1443,14 @@ textarea:focus {
         padding: 12px;
     }
 
-    .chat-input-area {
+    .chat-input-area,
+    .chat-input {
         flex-direction: column;
+    }
+
+    .chat-input-area button,
+    .chat-input button {
+        width: 100%;
     }
 
     .chat-actions {

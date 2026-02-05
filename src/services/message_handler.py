@@ -306,14 +306,15 @@ async def handle_new_message(event, telegram_service) -> None:
 
         chat_id = event.chat_id
         message_id = message.id
-        sender_id = event.sender_id
+        # In channels, sender_id can be None - use chat_id as fallback
+        sender_id = event.sender_id or chat_id
         chat_title = getattr(chat, 'title', None) or getattr(chat, 'first_name', '') or str(chat_id)
         raw_text = event.text
 
         # Extract contact info (username or chat info)
         sender_username = getattr(sender, 'username', None) if sender else None
         chat_username = getattr(chat, 'username', None)
-        contact_info = f"@{sender_username}" if sender_username else (f"@{chat_username}" if chat_username else None)
+        contact_info = f"@{sender_username}" if sender_username else (f"@{chat_username}" if chat_username else f"chat:{chat_id}")
 
         logger.info(f"New message from {chat_title} ({chat_id}): {raw_text[:50]}...")
 
