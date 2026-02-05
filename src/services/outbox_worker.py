@@ -7,6 +7,7 @@ pending messages and sending them via Telegram.
 
 import asyncio
 import logging
+import random
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -17,6 +18,21 @@ from src.models import OutboxMessage, OutboxStatus
 from src.services.telegram_client import get_telegram_service
 
 logger = logging.getLogger(__name__)
+
+
+def calculate_typing_delay(text: str) -> float:
+    """
+    Calculate realistic typing delay based on message length.
+    Simulates human typing speed (about 40-60 chars per second with pauses).
+    """
+    char_count = len(text)
+    # Base delay: 1-2 seconds for short messages
+    # Plus ~0.05-0.1 seconds per character (simulating ~10-20 chars/sec typing)
+    base_delay = random.uniform(1.0, 2.5)
+    char_delay = char_count * random.uniform(0.03, 0.07)
+    total = base_delay + char_delay
+    # Cap at 8 seconds max
+    return min(total, 8.0)
 
 
 async def process_outbox_message(
@@ -35,9 +51,13 @@ async def process_outbox_message(
         return False
 
     try:
+        # Calculate realistic typing delay for human-like behavior
+        typing_delay = calculate_typing_delay(message.message_text)
+
         success = await telegram.send_message(
             message.recipient_id,
             message.message_text,
+            typing_delay=typing_delay,
         )
 
         if success:

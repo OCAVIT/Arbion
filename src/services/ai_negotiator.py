@@ -29,22 +29,39 @@ from src.models import (
 
 logger = logging.getLogger(__name__)
 
-# Initial contact templates
+# Initial contact templates - casual, human-like
 INITIAL_TEMPLATES = [
-    "Здравствуйте! Увидел ваше объявление о {product}. Ещё актуально? Интересует покупка.",
-    "Добрый день! {product} ещё продаёте? Готов рассмотреть.",
-    "Привет! По поводу {product} - актуально? Интересует.",
+    "привет) {product} ещё есть?",
+    "здравствуйте, {product} актуально?",
+    "добрый день! увидел объявление, {product} продаёте ещё?",
+    "о, {product}! ещё в продаже?",
+    "хай, по {product} актуально?",
+    "прив! {product} есть в наличии?",
+    "здрасте) по поводу {product} - актуально?",
 ]
 
 # Follow-up templates based on seller response
 FOLLOWUP_INTERESTED = [
-    "Отлично! Подскажите, какое состояние? И возможен ли торг?",
-    "Хорошо! А что по состоянию? Комплект полный?",
+    "о круто! а состояние какое? есть косяки?",
+    "супер) что по состоянию? комплект полный?",
+    "отлично! а чё с состоянием? всё работает?",
+    "класс, подскажи по состоянию плиз",
+    "хорошо! а что по внешке? царапины есть?",
 ]
 
 FOLLOWUP_PRICE_CHECK = [
-    "Понял. А по цене можно подвинуться? Готов забрать сегодня.",
-    "Ясно. Если немного уступите - заберу сразу.",
+    "понял, а по цене можно чуть подвинуться? готов сегодня забрать",
+    "ясно) если скинешь немного - сразу заберу",
+    "хм, а торг будет? могу подъехать сегодня",
+    "а если чуть дешевле - возьму прям щас",
+    "окей, по цене договоримся? я быстро заберу",
+]
+
+# Clarification templates
+FOLLOWUP_UNCLEAR = [
+    "хм, не совсем понял) так продаёшь ещё?",
+    "а можно подробнее? интересует покупка",
+    "так актуально или нет?)",
 ]
 
 # Keywords that indicate seller interest
@@ -109,13 +126,18 @@ def generate_response(stage: str, product: str, context: str = "") -> str:
 
     if stage == 'initial':
         template = random.choice(INITIAL_TEMPLATES)
-        return template.format(product=product)
+        # Make product name lowercase for casual feel
+        product_lower = product.lower() if product else "товар"
+        return template.format(product=product_lower)
 
     elif stage == 'positive':
         return random.choice(FOLLOWUP_INTERESTED)
 
     elif stage == 'price':
         return random.choice(FOLLOWUP_PRICE_CHECK)
+
+    elif stage == 'unclear':
+        return random.choice(FOLLOWUP_UNCLEAR)
 
     else:
         # Default follow-up

@@ -9,6 +9,7 @@ Handles:
 
 import asyncio
 import logging
+import random
 from typing import Callable, Optional
 
 from telethon import TelegramClient, events
@@ -91,13 +92,14 @@ class TelegramService:
 
         self._message_handlers.append(wrapper)
 
-    async def send_message(self, recipient_id: int, text: str) -> bool:
+    async def send_message(self, recipient_id: int, text: str, typing_delay: float = 0) -> bool:
         """
         Send a message to a user or chat.
 
         Args:
             recipient_id: Telegram user/chat ID
             text: Message text to send
+            typing_delay: Seconds to show "typing" before sending (0 = no typing)
 
         Returns:
             True if sent successfully, False otherwise
@@ -108,6 +110,12 @@ class TelegramService:
 
         try:
             entity = await self.client.get_entity(recipient_id)
+
+            # Show typing indicator if delay is set
+            if typing_delay > 0:
+                async with self.client.action(entity, 'typing'):
+                    await asyncio.sleep(typing_delay)
+
             await self.client.send_message(entity, text)
             logger.info(f"Message sent to {recipient_id}")
             return True
