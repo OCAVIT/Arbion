@@ -92,7 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function loadDeal() {
-    const response = await fetch(`/api/admin/deals/${dealId}/data`);
+    const response = await fetch(`/admin/deals/${dealId}/data`);
     const deal = await response.json();
 
     document.getElementById('dealStatus').textContent = deal.status;
@@ -108,7 +108,7 @@ async function loadDeal() {
 }
 
 async function loadMessages() {
-    const response = await fetch(`/api/admin/deals/${dealId}/messages`);
+    const response = await fetch(`/admin/deals/${dealId}/messages`);
     const data = await response.json();
 
     const container = document.getElementById('chatMessages');
@@ -131,7 +131,7 @@ async function loadMessages() {
 }
 
 async function loadManagers() {
-    const response = await fetch('/api/admin/managers/list?active_only=true');
+    const response = await fetch('/admin/managers/list?active_only=true');
     const data = await response.json();
 
     const select = document.getElementById('managerSelect');
@@ -147,7 +147,7 @@ async function assignManager() {
     const managerId = document.getElementById('managerSelect').value;
     if (!managerId) return;
 
-    await fetch(`/api/admin/deals/${dealId}/assign`, {
+    await fetch(`/admin/deals/${dealId}/assign`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ manager_id: parseInt(managerId) })
@@ -160,7 +160,7 @@ async function sendMessage() {
     const content = input.value.trim();
     if (!content) return;
 
-    await fetch(`/api/admin/deals/${dealId}/message`, {
+    await fetch(`/admin/deals/${dealId}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content })
@@ -173,7 +173,7 @@ async function sendMessage() {
 async function closeDeal(status) {
     const resolution = prompt('Комментарий к закрытию (опционально):');
 
-    await fetch(`/api/admin/deals/${dealId}/close`, {
+    await fetch(`/admin/deals/${dealId}/close`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status, resolution })

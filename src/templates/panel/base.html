@@ -15,26 +15,32 @@
     <aside class="sidebar sidebar-panel" id="sidebar">
         <div class="sidebar-header">
             <h2>Arbion</h2>
-            <span class="badge badge-manager">{{ user.display_name }}</span>
+            <span class="badge badge-manager">Менеджер</span>
         </div>
 
         <nav class="sidebar-nav">
-            <a href="/panel" class="nav-item {% if request.url.path == '/panel' %}active{% endif %}">
-                <span class="nav-icon">&#9776;</span>
+            <div class="nav-section">Рабочее место</div>
+            <a href="/panel" class="nav-item {% if request.url.path == '/panel' or request.url.path == '/panel/dashboard' %}active{% endif %}">
+                <span class="nav-icon">🏠</span>
                 <span>Главная</span>
             </a>
             <a href="/panel/deals" class="nav-item {% if '/deals' in request.url.path %}active{% endif %}">
-                <span class="nav-icon">&#128176;</span>
+                <span class="nav-icon">💼</span>
                 <span>Мои сделки</span>
             </a>
+
+            <div class="nav-section">Аккаунт</div>
             <a href="/panel/profile" class="nav-item {% if '/profile' in request.url.path %}active{% endif %}">
-                <span class="nav-icon">&#128100;</span>
+                <span class="nav-icon">👤</span>
                 <span>Профиль</span>
             </a>
         </nav>
 
         <div class="sidebar-footer">
-            <button onclick="logout()" class="btn btn-sm btn-outline">Выход</button>
+            <div class="user-info">
+                👋 {{ user.display_name }}
+            </div>
+            <button onclick="logout()" class="btn btn-sm btn-outline btn-block">Выход</button>
         </div>
     </aside>
 

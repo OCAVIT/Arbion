@@ -64,7 +64,7 @@ async function loadDeals() {
     if (status) params.append('status', status);
     if (product) params.append('product', product);
 
-    const response = await fetch(`/api/admin/deals/list?${params}`);
+    const response = await fetch(`/admin/deals/list?${params}`);
     const data = await response.json();
 
     renderDeals(data.items);

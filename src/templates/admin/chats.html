@@ -109,7 +109,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function loadStats() {
-    const response = await fetch('/api/admin/chats/stats');
+    const response = await fetch('/admin/chats/stats');
     const data = await response.json();
 
     document.getElementById('activeChats').textContent = data.active_chats;
@@ -132,7 +132,7 @@ async function loadChats() {
     if (status) params.append('status', status);
     if (search) params.append('search', search);
 
-    const response = await fetch(`/api/admin/chats/list?${params}`);
+    const response = await fetch(`/admin/chats/list?${params}`);
     const data = await response.json();
 
     renderChats(data.items);
@@ -177,20 +177,20 @@ function renderChats(chats) {
 
 async function saveTarget() {
     const target = document.getElementById('targetInput').value;
-    await fetch('/api/admin/chats/target?target=' + target, { method: 'POST' });
+    await fetch('/admin/chats/target?target=' + target, { method: 'POST' });
     loadStats();
 }
 
 async function leaveChat(id) {
     if (!confirm('Покинуть этот чат?')) return;
-    await fetch(`/api/admin/chats/${id}/leave`, { method: 'POST' });
+    await fetch(`/admin/chats/${id}/leave`, { method: 'POST' });
     loadChats();
     loadStats();
 }
 
 async function blacklistChat(id) {
     if (!confirm('Заблокировать этот чат навсегда?')) return;
-    await fetch(`/api/admin/chats/${id}/blacklist`, { method: 'POST' });
+    await fetch(`/admin/chats/${id}/blacklist`, { method: 'POST' });
     loadChats();
     loadStats();
 }
@@ -208,7 +208,7 @@ async function addSeed() {
     const query = document.getElementById('seedQuery').value.trim();
     if (!query) return;
 
-    await fetch('/api/admin/seeds', {
+    await fetch('/admin/settings/seeds', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query })

@@ -63,7 +63,7 @@ async function loadOrders() {
     if (product) params.append('product', product);
     if (region) params.append('region', region);
 
-    const response = await fetch(`/api/admin/orders/list?${params}`);
+    const response = await fetch(`/admin/orders/list?${params}`);
     const data = await response.json();
 
     renderOrders(data.items);
@@ -97,7 +97,7 @@ function renderOrders(orders) {
 
 async function deleteOrder(id) {
     if (!confirm('Удалить эту заявку?')) return;
-    await fetch(`/api/admin/orders/${id}`, { method: 'DELETE' });
+    await fetch(`/admin/orders/${id}`, { method: 'DELETE' });
     loadOrders();
 }
 

@@ -56,7 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function loadSummary() {
-    const response = await fetch('/api/admin/finance/summary');
+    const response = await fetch('/admin/finance/summary');
     const data = await response.json();
 
     document.getElementById('totalProfit').textContent = formatMoney(data.total_profit);
@@ -66,7 +66,7 @@ async function loadSummary() {
 }
 
 async function loadLedger() {
-    const response = await fetch('/api/admin/finance/ledger');
+    const response = await fetch('/admin/finance/ledger');
     const data = await response.json();
 
     const tbody = document.getElementById('ledgerTableBody');

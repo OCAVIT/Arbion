@@ -90,7 +90,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function loadMetrics() {
     try {
-        const response = await fetch('/api/admin/metrics');
+        const response = await fetch('/admin/dashboard/metrics');
+        if (!response.ok) throw new Error('Failed to load metrics');
         const data = await response.json();
         updateMetricsUI(data);
     } catch (error) {

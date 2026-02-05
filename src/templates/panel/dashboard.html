@@ -63,17 +63,22 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function loadStats() {
-    const response = await fetch('/api/panel/stats');
-    const data = await response.json();
+    try {
+        const response = await fetch('/panel/dashboard/stats');
+        if (!response.ok) throw new Error('Failed to load stats');
+        const data = await response.json();
 
-    document.getElementById('activeDeals').textContent = data.active_deals;
-    document.getElementById('closedMonth').textContent = data.closed_this_month;
-    document.getElementById('conversionRate').textContent = data.conversion_rate + '%';
-    document.getElementById('warmPool').textContent = data.warm_leads_in_pool;
+        document.getElementById('activeDeals').textContent = data.active_deals;
+        document.getElementById('closedMonth').textContent = data.closed_this_month;
+        document.getElementById('conversionRate').textContent = data.conversion_rate + '%';
+        document.getElementById('warmPool').textContent = data.warm_leads_in_pool;
+    } catch (error) {
+        console.error('Error loading stats:', error);
+    }
 }
 
 async function loadPool() {
-    const response = await fetch('/api/panel/pool');
+    const response = await fetch('/panel/dashboard/pool');
     const data = await response.json();
 
     const container = document.getElementById('poolDeals');
@@ -102,7 +107,7 @@ async function loadPool() {
 }
 
 async function loadMyDeals() {
-    const response = await fetch('/api/panel/deals/list?include_pool=false');
+    const response = await fetch('/panel/deals/list?include_pool=false');
     const data = await response.json();
 
     const container = document.getElementById('myDeals');
@@ -132,7 +137,7 @@ async function loadMyDeals() {
 
 async function takeDeal(dealId) {
     try {
-        const response = await fetch(`/api/panel/deals/${dealId}/take`, { method: 'POST' });
+        const response = await fetch(`/panel/deals/${dealId}/take`, { method: 'POST' });
         const data = await response.json();
 
         if (response.ok) {

@@ -81,7 +81,7 @@
 document.addEventListener('DOMContentLoaded', loadSettings);
 
 async function loadSettings() {
-    const response = await fetch('/api/admin/settings/data');
+    const response = await fetch('/admin/settings/data');
     const data = await response.json();
 
     document.getElementById('targetChatCount').value = data.target_chat_count;
@@ -122,7 +122,7 @@ document.getElementById('settingsForm').addEventListener('submit', async (e) => 
         negotiator_interval_minutes: parseInt(document.getElementById('negotiatorInterval').value),
     };
 
-    await fetch('/api/admin/settings/data', {
+    await fetch('/admin/settings/data', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
@@ -136,7 +136,7 @@ async function addSeed() {
     const query = input.value.trim();
     if (!query) return;
 
-    await fetch('/api/admin/seeds', {
+    await fetch('/admin/settings/seeds', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query })
@@ -147,7 +147,7 @@ async function addSeed() {
 }
 
 async function removeSeed(query) {
-    await fetch(`/api/admin/seeds/${encodeURIComponent(query)}`, { method: 'DELETE' });
+    await fetch(`/admin/settings/seeds/${encodeURIComponent(query)}`, { method: 'DELETE' });
     loadSettings();
 }
 

@@ -84,7 +84,7 @@
 document.addEventListener('DOMContentLoaded', loadProfile);
 
 async function loadProfile() {
-    const response = await fetch('/api/panel/profile/data');
+    const response = await fetch('/panel/profile/data');
     const data = await response.json();
 
     document.getElementById('displayName').textContent = data.display_name;
@@ -114,7 +114,7 @@ document.getElementById('passwordForm').addEventListener('submit', async (e) => 
     }
 
     try {
-        const response = await fetch('/api/panel/profile/password', {
+        const response = await fetch('/panel/profile/password', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

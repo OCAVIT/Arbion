@@ -15,49 +15,58 @@
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
             <h2>Arbion</h2>
-            <span class="badge badge-owner">Owner</span>
+            <span class="badge badge-owner">Администратор</span>
         </div>
 
         <nav class="sidebar-nav">
-            <a href="/admin" class="nav-item {% if request.url.path == '/admin' %}active{% endif %}">
-                <span class="nav-icon">&#9776;</span>
+            <div class="nav-section">Обзор</div>
+            <a href="/admin" class="nav-item {% if request.url.path == '/admin' or request.url.path == '/admin/dashboard' %}active{% endif %}">
+                <span class="nav-icon">📊</span>
                 <span>Дашборд</span>
             </a>
+
+            <div class="nav-section">Автоматизация</div>
             <a href="/admin/chats" class="nav-item {% if '/chats' in request.url.path %}active{% endif %}">
-                <span class="nav-icon">&#128172;</span>
+                <span class="nav-icon">💬</span>
                 <span>Чаты</span>
             </a>
             <a href="/admin/orders" class="nav-item {% if '/orders' in request.url.path %}active{% endif %}">
-                <span class="nav-icon">&#128203;</span>
+                <span class="nav-icon">📋</span>
                 <span>Заявки</span>
             </a>
-            <a href="/admin/deals" class="nav-item {% if '/deals' in request.url.path %}active{% endif %}">
-                <span class="nav-icon">&#128176;</span>
+            <a href="/admin/deals" class="nav-item {% if '/deals' in request.url.path and '/managers' not in request.url.path %}active{% endif %}">
+                <span class="nav-icon">💰</span>
                 <span>Сделки</span>
             </a>
+
+            <div class="nav-section">Команда</div>
             <a href="/admin/managers" class="nav-item {% if '/managers' in request.url.path %}active{% endif %}">
-                <span class="nav-icon">&#128101;</span>
+                <span class="nav-icon">👥</span>
                 <span>Менеджеры</span>
             </a>
+
+            <div class="nav-section">Аналитика</div>
             <a href="/admin/finance" class="nav-item {% if '/finance' in request.url.path %}active{% endif %}">
-                <span class="nav-icon">&#128181;</span>
+                <span class="nav-icon">💵</span>
                 <span>Финансы</span>
             </a>
             <a href="/admin/audit" class="nav-item {% if '/audit' in request.url.path %}active{% endif %}">
-                <span class="nav-icon">&#128269;</span>
+                <span class="nav-icon">📝</span>
                 <span>Аудит</span>
             </a>
+
+            <div class="nav-section">Система</div>
             <a href="/admin/settings" class="nav-item {% if '/settings' in request.url.path %}active{% endif %}">
-                <span class="nav-icon">&#9881;</span>
+                <span class="nav-icon">⚙️</span>
                 <span>Настройки</span>
             </a>
         </nav>
 
         <div class="sidebar-footer">
             <div class="user-info">
-                <span>{{ user.display_name }}</span>
+                👤 {{ user.display_name }}
             </div>
-            <button onclick="logout()" class="btn btn-sm btn-outline">Выход</button>
+            <button onclick="logout()" class="btn btn-sm btn-outline btn-block">Выход</button>
         </div>
     </aside>
 

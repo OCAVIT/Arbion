@@ -122,9 +122,16 @@
 document.addEventListener('DOMContentLoaded', loadManagers);
 
 async function loadManagers() {
-    const response = await fetch('/api/admin/managers/list');
-    const data = await response.json();
-    renderManagers(data.items);
+    try {
+        const response = await fetch('/admin/managers/list');
+        if (!response.ok) throw new Error('Failed to load managers');
+        const data = await response.json();
+        renderManagers(data.items || []);
+    } catch (error) {
+        console.error('Error loading managers:', error);
+        document.getElementById('managersTableBody').innerHTML =
+            '<tr><td colspan="10" class="empty">Ошибка загрузки данных</td></tr>';
+    }
 }
 
 function renderManagers(managers) {
@@ -179,7 +186,7 @@ async function createManager() {
         return;
     }
 
-    const response = await fetch('/api/admin/managers', {
+    const response = await fetch('/admin/managers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password, display_name: displayName })
@@ -196,12 +203,12 @@ async function createManager() {
 
 async function deactivateManager(id) {
     if (!confirm('Деактивировать этого менеджера?')) return;
-    await fetch(`/api/admin/managers/${id}`, { method: 'DELETE' });
+    await fetch(`/admin/managers/${id}`, { method: 'DELETE' });
     loadManagers();
 }
 
 async function activateManager(id) {
-    await fetch(`/api/admin/managers/${id}`, {
+    await fetch(`/admin/managers/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_active: true })
@@ -245,7 +252,7 @@ async function regenerateToken() {
     if (!confirm('Вы уверены? Старая ссылка перестанет работать.')) return;
 
     try {
-        const response = await fetch(`/api/admin/managers/${currentLinkManagerId}/regenerate-token`, {
+        const response = await fetch(`/admin/managers/${currentLinkManagerId}/regenerate-token`, {
             method: 'POST'
         });
 
@@ -284,7 +291,7 @@ async function confirmResetPassword() {
     }
 
     try {
-        const response = await fetch(`/api/admin/managers/${currentResetManagerId}/reset-password?new_password=${encodeURIComponent(newPassword)}`, {
+        const response = await fetch(`/admin/managers/${currentResetManagerId}/reset-password?new_password=${encodeURIComponent(newPassword)}`, {
             method: 'POST'
         });
 

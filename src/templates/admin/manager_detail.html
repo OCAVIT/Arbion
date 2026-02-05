@@ -72,7 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function loadManagerStats() {
-    const response = await fetch(`/api/admin/managers/${managerId}/stats`);
+    const response = await fetch(`/admin/managers/${managerId}/stats`);
     const data = await response.json();
 
     document.getElementById('managerName').textContent = data.display_name;
@@ -85,7 +85,7 @@ async function loadManagerStats() {
 }
 
 async function loadAuditLog() {
-    const response = await fetch(`/api/admin/managers/${managerId}/audit`);
+    const response = await fetch(`/admin/managers/${managerId}/audit`);
     const data = await response.json();
 
     const tbody = document.getElementById('auditTableBody');

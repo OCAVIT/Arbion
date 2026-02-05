@@ -45,7 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function loadActions() {
-    const response = await fetch('/api/admin/audit/actions');
+    const response = await fetch('/admin/audit/actions');
     const data = await response.json();
 
     const select = document.getElementById('actionFilter');
@@ -58,7 +58,7 @@ async function loadActions() {
 }
 
 async function loadUsers() {
-    const response = await fetch('/api/admin/managers/list');
+    const response = await fetch('/admin/managers/list');
     const data = await response.json();
 
     const select = document.getElementById('userFilter');
@@ -78,7 +78,7 @@ async function loadAudit() {
     if (action) params.append('action', action);
     if (userId) params.append('user_id', userId);
 
-    const response = await fetch(`/api/admin/audit/list?${params}`);
+    const response = await fetch(`/admin/audit/list?${params}`);
     const data = await response.json();
 
     renderAudit(data.items);

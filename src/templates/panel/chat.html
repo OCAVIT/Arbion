@@ -48,7 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function loadMessages() {
-    const response = await fetch(`/api/panel/chat/${negotiationId}/messages`);
+    const response = await fetch(`/panel/chat/${negotiationId}/messages`);
     const data = await response.json();
 
     // Update info
@@ -89,7 +89,7 @@ async function sendMessage() {
     const content = input.value.trim();
     if (!content) return;
 
-    const response = await fetch(`/api/panel/chat/${negotiationId}/send`, {
+    const response = await fetch(`/panel/chat/${negotiationId}/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content })
@@ -107,7 +107,7 @@ async function sendMessage() {
 async function closeDeal(status) {
     const resolution = prompt('Комментарий (опционально):');
 
-    const response = await fetch(`/api/panel/chat/${negotiationId}/close`, {
+    const response = await fetch(`/panel/chat/${negotiationId}/close`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status, resolution })

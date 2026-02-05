@@ -20,15 +20,17 @@
 document.addEventListener('DOMContentLoaded', loadDeals);
 
 async function loadDeals() {
-    const response = await fetch('/api/panel/deals/list?include_pool=true');
-    const data = await response.json();
+    try {
+        const response = await fetch('/panel/deals/list?include_pool=true');
+        if (!response.ok) throw new Error('Failed to load deals');
+        const data = await response.json();
 
-    const container = document.getElementById('dealsGrid');
+        const container = document.getElementById('dealsGrid');
 
-    if (data.items.length === 0) {
-        container.innerHTML = '<div class="empty">Нет сделок</div>';
-        return;
-    }
+        if (!data.items || data.items.length === 0) {
+            container.innerHTML = '<div class="empty">Нет сделок</div>';
+            return;
+        }
 
     container.innerHTML = data.items.map(deal => `
         <div class="deal-card ${deal.can_take ? 'deal-card-warm' : ''}">
@@ -58,11 +60,15 @@ async function loadDeals() {
             </div>
         </div>
     `).join('');
+    } catch (error) {
+        console.error('Error loading deals:', error);
+        document.getElementById('dealsGrid').innerHTML = '<div class="empty">Ошибка загрузки данных</div>';
+    }
 }
 
 async function takeDeal(dealId) {
     try {
-        const response = await fetch(`/api/panel/deals/${dealId}/take`, { method: 'POST' });
+        const response = await fetch(`/panel/deals/${dealId}/take`, { method: 'POST' });
         const data = await response.json();
 
         if (response.ok) {
