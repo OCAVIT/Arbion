@@ -13,7 +13,7 @@ from src.api.admin.settings import router as settings_router
 
 admin_router = APIRouter(prefix="/admin", tags=["Admin"])
 
-admin_router.include_router(dashboard_router)
+admin_router.include_router(dashboard_router, prefix="/dashboard")
 admin_router.include_router(chats_router)
 admin_router.include_router(orders_router)
 admin_router.include_router(deals_router)
