@@ -20,8 +20,9 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Database
+    # Database - Railway provides DATABASE_URL automatically when Postgres is linked
     database_url: str = Field(
+        default="",
         description="PostgreSQL connection string (async)"
     )
 
@@ -29,6 +30,10 @@ class Settings(BaseSettings):
     @classmethod
     def convert_database_url(cls, v: str) -> str:
         """Convert standard postgres URL to asyncpg format."""
+        if not v:
+            import os
+            # Try Railway's automatic variable
+            v = os.environ.get("DATABASE_URL", "")
         if v.startswith("postgres://"):
             v = v.replace("postgres://", "postgresql+asyncpg://", 1)
         elif v.startswith("postgresql://") and "+asyncpg" not in v:
