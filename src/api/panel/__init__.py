@@ -9,7 +9,7 @@ from src.api.panel.profile import router as profile_router
 
 panel_router = APIRouter(prefix="/panel", tags=["Panel"])
 
-panel_router.include_router(dashboard_router)
+panel_router.include_router(dashboard_router, prefix="/dashboard")
 panel_router.include_router(deals_router)
 panel_router.include_router(chat_router)
 panel_router.include_router(profile_router)
