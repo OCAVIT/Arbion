@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 class NegotiationStage(str, Enum):
     """Stage of the negotiation process."""
     INITIAL = "initial"              # First contact
+    CONTACTED = "contacted"          # Seller responded
+    NEGOTIATING = "negotiating"      # Actively discussing
     PRICE_DISCUSSION = "price_discussion"  # Discussing price/terms
     LOGISTICS = "logistics"          # Discussing delivery
     WARM = "warm"                    # Ready for human
