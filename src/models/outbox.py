@@ -28,7 +28,7 @@ class OutboxMessage(Base):
     by the outbox_worker background task.
     """
 
-    __tablename__ = "outbox"
+    __tablename__ = "outbox_messages"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     recipient_id: Mapped[int] = mapped_column(
