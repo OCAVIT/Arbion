@@ -457,7 +457,10 @@ async def process_seller_response(
     Обработка ответа продавца с умной логикой ведения диалога.
     """
     try:
-        logger.info(f"Обработка ответа продавца для переговоров #{negotiation.id}: '{response_text[:50]}...'")
+        logger.info(
+            f">>> Обработка ответа ПРОДАВЦА для переговоров #{negotiation.id}: "
+            f"'{response_text[:50]}...' (deal_id={negotiation.deal_id}, stage={negotiation.stage.value})"
+        )
 
         # Сохраняем сообщение продавца
         seller_msg = NegotiationMessage(
@@ -468,7 +471,7 @@ async def process_seller_response(
         )
         db.add(seller_msg)
         await db.flush()
-        logger.info(f"Сообщение продавца #{seller_msg.id} сохранено в историю")
+        logger.info(f"Сообщение продавца #{seller_msg.id} сохранено в историю (negotiation_id={negotiation.id})")
 
         # Получаем контекст разговора
         context = await get_conversation_context(negotiation, db, MessageTarget.SELLER)
@@ -482,13 +485,15 @@ async def process_seller_response(
         # Определяем следующее действие
         action, response = determine_next_action(sentiment, phone, context, negotiation.stage)
 
+        logger.info(f"Переговоры {negotiation.id}: action={action}, response='{response[:30] if response else None}...'")
+
         if action == 'warm':
             # Сделка тёплая - получили номер телефона!
             deal.status = DealStatus.WARM
             deal.ai_insight = f"Продавец заинтересован. Получен контакт: {phone or 'упомянут'}. Последнее сообщение: {response_text[:100]}"
             negotiation.stage = NegotiationStage.WARM
             await db.commit()
-            logger.info(f"Сделка {deal.id} стала WARM - получен номер телефона!")
+            logger.info(f">>> Сделка {deal.id} стала WARM - получен номер телефона!")
             return True
 
         elif action == 'close':
@@ -548,15 +553,16 @@ async def process_seller_response(
             deal.ai_insight = f"В диалоге. Обменов: {exchanges + 1}. Последний ответ: {response_text[:50]}"
 
             await db.commit()
-            logger.info(f"Переговоры {negotiation.id}: отправлен follow-up")
+            logger.info(f">>> Переговоры {negotiation.id}: отправлен follow-up продавцу: '{response}'")
             return True
 
         # Если ничего не подошло - просто сохраняем
         await db.commit()
+        logger.info(f"Переговоры {negotiation.id}: сообщение сохранено без ответа")
         return True
 
     except Exception as e:
-        logger.error(f"Ошибка при обработке ответа продавца для переговоров {negotiation.id}: {e}")
+        logger.error(f"ОШИБКА при обработке ответа продавца для переговоров {negotiation.id}: {e}", exc_info=True)
         await db.rollback()
         return False
 
@@ -570,7 +576,10 @@ async def process_buyer_response(
     Обработка ответа покупателя.
     """
     try:
-        logger.info(f"Обработка ответа покупателя для переговоров #{negotiation.id}: '{response_text[:50]}...'")
+        logger.info(
+            f">>> Обработка ответа ПОКУПАТЕЛЯ для переговоров #{negotiation.id}: "
+            f"'{response_text[:50]}...' (deal_id={negotiation.deal_id}, stage={negotiation.stage.value})"
+        )
 
         # Сохраняем сообщение покупателя
         buyer_msg = NegotiationMessage(
@@ -594,12 +603,13 @@ async def process_buyer_response(
 
         # Определяем следующее действие
         action, response = determine_next_action(sentiment, phone, context, negotiation.stage)
+        logger.info(f"Переговоры {negotiation.id} (покупатель): action={action}, response='{response[:30] if response else None}...'")
 
         if action == 'warm' and phone:
             # Покупатель дал номер - отмечаем
             deal.ai_insight = (deal.ai_insight or "") + f"\nПокупатель дал контакт: {phone}"
             await db.commit()
-            logger.info(f"Сделка {deal.id}: покупатель дал номер")
+            logger.info(f">>> Сделка {deal.id}: покупатель дал номер!")
             return True
 
         elif action == 'close':
@@ -649,17 +659,17 @@ async def process_buyer_response(
             deal.ai_insight = (deal.ai_insight or "") + f"\nПокупатель: {response_text[:30]}"
 
             await db.commit()
-            logger.info(f"Переговоры {negotiation.id}: отправлен ответ покупателю")
+            logger.info(f">>> Переговоры {negotiation.id}: отправлен follow-up покупателю: '{response}'")
             return True
 
         # Просто сохраняем
         deal.ai_insight = (deal.ai_insight or "") + f"\nПокупатель: {response_text[:50]}"
         await db.commit()
-        logger.info(f"Сохранён ответ покупателя для переговоров {negotiation.id}")
+        logger.info(f"Переговоры {negotiation.id}: сообщение покупателя сохранено без ответа")
         return True
 
     except Exception as e:
-        logger.error(f"Ошибка при обработке ответа покупателя для переговоров {negotiation.id}: {e}")
+        logger.error(f"ОШИБКА при обработке ответа покупателя для переговоров {negotiation.id}: {e}", exc_info=True)
         await db.rollback()
         return False
 

@@ -13,7 +13,7 @@ import re
 from decimal import Decimal
 from typing import Optional, Tuple
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import selectinload
 
@@ -443,13 +443,14 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
         True if message was a negotiation response
     """
     if not sender_id:
+        logger.info(f"check_negotiation_response: sender_id пустой, пропускаем")
         return False
 
     try:
-        logger.debug(f"Проверяем переговоры для sender_id={sender_id}")
+        logger.info(f"Проверяем переговоры для sender_id={sender_id}, текст: '{message_text[:30]}...'")
 
         # Проверяем, является ли это ответом ПРОДАВЦА
-        result = await db.execute(
+        seller_query = (
             select(Negotiation)
             .options(selectinload(Negotiation.deal))
             .where(
@@ -462,15 +463,21 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
                 )
             )
         )
+        result = await db.execute(seller_query)
         negotiation = result.scalar_one_or_none()
 
         if negotiation:
-            logger.info(f"Найдены активные переговоры {negotiation.id} для продавца {sender_id}")
+            logger.info(
+                f"Найдены активные переговоры #{negotiation.id} для продавца {sender_id} "
+                f"(stage={negotiation.stage.value}, deal_id={negotiation.deal_id})"
+            )
             await process_seller_response(negotiation, message_text, db)
             return True
 
+        logger.info(f"Переговоры для продавца sender_id={sender_id} не найдены, проверяем покупателя...")
+
         # Проверяем, является ли это ответом ПОКУПАТЕЛЯ
-        result = await db.execute(
+        buyer_query = (
             select(Negotiation)
             .options(selectinload(Negotiation.deal))
             .join(DetectedDeal, Negotiation.deal_id == DetectedDeal.id)
@@ -484,19 +491,47 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
                 )
             )
         )
+        result = await db.execute(buyer_query)
         negotiation = result.scalar_one_or_none()
 
         if negotiation:
-            logger.info(f"Найдены активные переговоры {negotiation.id} для покупателя {sender_id}")
+            logger.info(
+                f"Найдены активные переговоры #{negotiation.id} для покупателя {sender_id} "
+                f"(stage={negotiation.stage.value}, deal_id={negotiation.deal_id})"
+            )
             await process_buyer_response(negotiation, message_text, db)
             return True
 
-        logger.debug(f"Переговоры для sender_id={sender_id} не найдены")
+        # Диагностика: проверим сколько активных переговоров вообще есть
+        count_result = await db.execute(
+            select(func.count()).select_from(Negotiation).where(
+                Negotiation.stage != NegotiationStage.CLOSED
+            )
+        )
+        active_count = count_result.scalar() or 0
+
+        # Также проверим есть ли переговоры с этим seller_sender_id (без фильтра по stage)
+        all_for_seller = await db.execute(
+            select(Negotiation).where(
+                or_(
+                    Negotiation.seller_sender_id == sender_id,
+                    Negotiation.seller_chat_id == sender_id,
+                )
+            )
+        )
+        seller_negotiations = all_for_seller.scalars().all()
+
+        logger.info(
+            f"Переговоры для sender_id={sender_id} НЕ НАЙДЕНЫ. "
+            f"Всего активных переговоров в БД: {active_count}. "
+            f"Переговоров с этим seller_id (любой stage): {len(seller_negotiations)} "
+            f"[stages: {[n.stage.value for n in seller_negotiations]}]"
+        )
         return False
 
     except Exception as e:
-        # Если ошибка с enum или БД - логируем и возвращаем False
-        logger.warning(f"Ошибка при проверке переговоров: {e}", exc_info=True)
+        # Если ошибка с enum или БД - логируем ERROR и возвращаем False
+        logger.error(f"Ошибка при проверке переговоров для sender_id={sender_id}: {e}", exc_info=True)
         return False
 
 
@@ -548,6 +583,7 @@ async def handle_new_message(event, telegram_service) -> None:
                 index_elements=['chat_id', 'message_id']
             )
             await db.execute(stmt)
+            logger.info(f"Raw message сохранено, проверяем переговоры для sender_id={sender_id}")
 
             # ВАЖНО: Сначала проверяем, является ли сообщение ответом на активные переговоры
             # Это критично, т.к. ответ "да, продаю" содержит ключевое слово и иначе
