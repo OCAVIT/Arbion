@@ -45,14 +45,14 @@ async def process_outbox_message(
             message.sent_at = datetime.now(timezone.utc)
             logger.info(f"Outbox message {message.id} sent successfully")
         else:
-            message.status = OutboxStatus.ERROR
+            message.status = OutboxStatus.FAILED
             message.error_message = "Failed to send via Telegram"
             logger.error(f"Outbox message {message.id} failed to send")
 
         return success
 
     except Exception as e:
-        message.status = OutboxStatus.ERROR
+        message.status = OutboxStatus.FAILED
         message.error_message = str(e)
         logger.error(f"Outbox message {message.id} error: {e}")
         return False

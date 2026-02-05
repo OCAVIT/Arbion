@@ -17,7 +17,7 @@ class OutboxStatus(str, Enum):
     """Status of outgoing message."""
     PENDING = "pending"  # Waiting to be sent
     SENT = "sent"        # Successfully sent
-    ERROR = "error"      # Failed to send
+    FAILED = "failed"    # Failed to send
 
 
 class OutboxMessage(Base):
