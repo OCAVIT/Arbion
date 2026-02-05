@@ -6,7 +6,7 @@ All environment variables are loaded from .env file.
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,6 +25,16 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://user:pass@localhost:5432/arbion",
         description="PostgreSQL connection string (async)"
     )
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def convert_database_url(cls, v: str) -> str:
+        """Convert standard postgres URL to asyncpg format."""
+        if v.startswith("postgres://"):
+            v = v.replace("postgres://", "postgresql+asyncpg://", 1)
+        elif v.startswith("postgresql://") and "+asyncpg" not in v:
+            v = v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
 
     # Authentication
     secret_key: str = Field(
