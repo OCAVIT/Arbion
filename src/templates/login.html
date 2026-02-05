@@ -6,6 +6,13 @@
 <div class="login-container">
     <div class="login-card">
         <div class="login-header">
+            <div class="login-logo">
+                <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+                    <rect width="48" height="48" rx="12" fill="#3b82f6"/>
+                    <path d="M24 12L36 36H12L24 12Z" fill="white" opacity="0.9"/>
+                    <circle cx="24" cy="28" r="4" fill="#3b82f6"/>
+                </svg>
+            </div>
             <h1>Arbion</h1>
             {% if manager_name %}
             <p>Добро пожаловать, {{ manager_name }}</p>
@@ -22,6 +29,7 @@
             <div class="form-group">
                 <label for="username">Логин</label>
                 <input type="text" id="username" name="username" required autocomplete="username"
+                       placeholder="Введите логин"
                        value="{{ prefill_username or '' }}" {% if prefill_username %}readonly{% endif %}>
                 {% if prefill_username %}
                 <small class="form-hint">Ваш логин уже заполнен</small>
@@ -31,27 +39,117 @@
             <div class="form-group">
                 <label for="password">Пароль</label>
                 <input type="password" id="password" name="password" required autocomplete="current-password"
+                       placeholder="Введите пароль"
                        {% if prefill_username %}autofocus{% endif %}>
             </div>
 
             <div id="errorMessage" class="error-message" style="display: none;"></div>
 
-            <button type="submit" class="btn btn-primary btn-block">
-                Войти
+            <div id="successMessage" class="success-message" style="display: none;">
+                <span class="success-icon">✓</span>
+                <span>Вход выполнен! Перенаправление...</span>
+            </div>
+
+            <button type="submit" id="submitBtn" class="btn btn-primary btn-block">
+                <span class="btn-text">Войти</span>
+                <span class="btn-loader" style="display: none;">
+                    <svg class="spinner" width="20" height="20" viewBox="0 0 20 20">
+                        <circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-dasharray="40" stroke-linecap="round"/>
+                    </svg>
+                </span>
             </button>
         </form>
+
+        <div class="login-footer">
+            <small>Защищённое соединение</small>
+        </div>
     </div>
 </div>
+
+<style>
+.login-logo {
+    margin-bottom: 16px;
+}
+
+.success-message {
+    background-color: rgba(34, 197, 94, 0.1);
+    border: 1px solid var(--success);
+    color: var(--success);
+    padding: 12px;
+    border-radius: var(--border-radius);
+    margin-bottom: 16px;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.success-icon {
+    font-size: 18px;
+    font-weight: bold;
+}
+
+.btn-loader {
+    display: inline-flex;
+    align-items: center;
+}
+
+.spinner {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.login-footer {
+    text-align: center;
+    margin-top: 24px;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.login-card {
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.form-group input::placeholder {
+    color: var(--text-muted);
+}
+
+.btn:disabled {
+    opacity: 0.7;
+    cursor: wait;
+}
+</style>
 
 <script>
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    const username = document.getElementById('username').value;
+    const form = e.target;
+    const username = document.getElementById('username').value.trim();
     const password = document.getElementById('password').value;
     const errorEl = document.getElementById('errorMessage');
+    const successEl = document.getElementById('successMessage');
+    const submitBtn = document.getElementById('submitBtn');
+    const btnText = submitBtn.querySelector('.btn-text');
+    const btnLoader = submitBtn.querySelector('.btn-loader');
 
+    // Reset states
     errorEl.style.display = 'none';
+    successEl.style.display = 'none';
+
+    // Show loading
+    submitBtn.disabled = true;
+    btnText.style.display = 'none';
+    btnLoader.style.display = 'inline-flex';
 
     try {
         const response = await fetch('/api/auth/login', {
@@ -59,20 +157,68 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
             headers: {
                 'Content-Type': 'application/json',
             },
+            credentials: 'same-origin',
             body: JSON.stringify({ username, password }),
         });
 
-        const data = await response.json();
+        let data;
+        try {
+            data = await response.json();
+        } catch {
+            throw new Error('Ошибка сервера');
+        }
 
         if (response.ok && data.success) {
-            window.location.href = data.redirect_url;
+            // Show success message
+            successEl.style.display = 'flex';
+
+            // Small delay for UX, then redirect
+            setTimeout(() => {
+                window.location.replace(data.redirect_url);
+            }, 300);
         } else {
-            errorEl.textContent = data.detail || 'Ошибка входа';
+            // Show error
+            let errorText = 'Ошибка входа';
+            if (data.detail) {
+                if (data.detail === 'Invalid username or password') {
+                    errorText = 'Неверный логин или пароль';
+                } else if (data.detail === 'Account is disabled') {
+                    errorText = 'Аккаунт деактивирован';
+                } else {
+                    errorText = data.detail;
+                }
+            }
+            errorEl.textContent = errorText;
             errorEl.style.display = 'block';
+
+            // Reset button
+            submitBtn.disabled = false;
+            btnText.style.display = 'inline';
+            btnLoader.style.display = 'none';
+
+            // Focus password field
+            document.getElementById('password').select();
         }
     } catch (error) {
-        errorEl.textContent = 'Ошибка соединения с сервером';
+        errorEl.textContent = error.message || 'Ошибка соединения с сервером';
         errorEl.style.display = 'block';
+
+        // Reset button
+        submitBtn.disabled = false;
+        btnText.style.display = 'inline';
+        btnLoader.style.display = 'none';
+    }
+});
+
+// Auto-focus on appropriate field
+document.addEventListener('DOMContentLoaded', () => {
+    const usernameInput = document.getElementById('username');
+    const passwordInput = document.getElementById('password');
+
+    if (usernameInput.value) {
+        passwordInput.focus();
+    } else {
+        usernameInput.focus();
     }
 });
 </script>
