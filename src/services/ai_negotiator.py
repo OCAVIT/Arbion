@@ -22,6 +22,7 @@ from src.models import (
     Negotiation,
     NegotiationMessage,
     NegotiationStage,
+    Order,
     OutboxMessage,
     OutboxStatus,
 )
@@ -145,8 +146,14 @@ async def initiate_negotiation(deal: DetectedDeal, db: AsyncSession) -> Optional
         # Get seller info from sell order
         sell_order = deal.sell_order
         if not sell_order:
-            logger.warning(f"Deal {deal.id} has no sell order")
-            return None
+            # Load sell_order from database if not loaded via relationship
+            result = await db.execute(
+                select(Order).where(Order.id == deal.sell_order_id)
+            )
+            sell_order = result.scalar_one_or_none()
+            if not sell_order:
+                logger.warning(f"Deal {deal.id} has no sell order (id={deal.sell_order_id})")
+                return None
 
         seller_chat_id = sell_order.chat_id
         seller_sender_id = sell_order.sender_id

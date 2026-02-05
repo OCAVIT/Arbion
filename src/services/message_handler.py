@@ -223,12 +223,17 @@ async def try_match_orders(db, new_order: Order) -> Optional[DetectedDeal]:
                         buyer_sender_id=buy_order.sender_id,
                     )
                     db.add(deal)
+                    await db.flush()  # Get deal ID and ensure it's persisted
+
+                    # Explicitly set relationships so they're available without refresh
+                    deal.sell_order = sell_order
+                    deal.buy_order = buy_order
 
                     # Mark orders as matched (deactivate)
                     buy_order.is_active = False
                     sell_order.is_active = False
 
-                    logger.info(f"Created deal: {deal.product} (margin: {margin})")
+                    logger.info(f"Created deal #{deal.id}: {deal.product} (margin: {margin})")
                     return deal
 
     return None
@@ -297,12 +302,18 @@ async def handle_new_message(event, telegram_service) -> None:
 
         message = event.message
         chat = await event.get_chat()
+        sender = await event.get_sender()
 
         chat_id = event.chat_id
         message_id = message.id
         sender_id = event.sender_id
         chat_title = getattr(chat, 'title', None) or getattr(chat, 'first_name', '') or str(chat_id)
         raw_text = event.text
+
+        # Extract contact info (username or chat info)
+        sender_username = getattr(sender, 'username', None) if sender else None
+        chat_username = getattr(chat, 'username', None)
+        contact_info = f"@{sender_username}" if sender_username else (f"@{chat_username}" if chat_username else None)
 
         logger.info(f"New message from {chat_title} ({chat_id}): {raw_text[:50]}...")
 
@@ -349,6 +360,7 @@ async def handle_new_message(event, telegram_service) -> None:
                         price=price,
                         region=region,
                         raw_text=raw_text,
+                        contact_info=contact_info,
                         is_active=True,
                     )
                     db.add(order)
