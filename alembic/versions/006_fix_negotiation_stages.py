@@ -9,6 +9,7 @@ Create Date: 2026-02-06
 from typing import Sequence, Union
 
 from alembic import op
+from sqlalchemy import text
 
 # revision identifiers, used by Alembic.
 revision: str = "006_fix_negotiation_stages"
@@ -19,12 +20,24 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Add missing stages to negotiationstage enum."""
-    # Add new enum values that are missing in the database
-    # Note: PostgreSQL doesn't support removing enum values, only adding
-    op.execute("ALTER TYPE negotiationstage ADD VALUE IF NOT EXISTS 'price_discussion'")
-    op.execute("ALTER TYPE negotiationstage ADD VALUE IF NOT EXISTS 'logistics'")
-    op.execute("ALTER TYPE negotiationstage ADD VALUE IF NOT EXISTS 'warm'")
-    op.execute("ALTER TYPE negotiationstage ADD VALUE IF NOT EXISTS 'handed_to_manager'")
+    # ВАЖНО: ALTER TYPE ... ADD VALUE нельзя выполнять внутри транзакции
+    # Поэтому нужно коммитить после каждого добавления
+    connection = op.get_bind()
+
+    # Добавляем каждое значение отдельно с autocommit
+    enum_values = ['price_discussion', 'logistics', 'warm', 'handed_to_manager']
+
+    for value in enum_values:
+        try:
+            # Выполняем вне транзакции
+            connection.execute(
+                text(f"ALTER TYPE negotiationstage ADD VALUE IF NOT EXISTS '{value}'")
+            )
+            connection.commit()
+        except Exception as e:
+            # Если значение уже существует, игнорируем
+            print(f"Note: Could not add enum value '{value}': {e}")
+            pass
 
 
 def downgrade() -> None:

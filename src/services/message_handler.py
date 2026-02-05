@@ -431,8 +431,8 @@ async def try_match_orders(db, new_order: Order) -> Optional[DetectedDeal]:
 
 async def check_negotiation_response(db, sender_id: int, message_text: str) -> bool:
     """
-    Check if incoming message is a response to an active negotiation.
-    If so, process it with AI negotiator.
+    Проверка, является ли сообщение ответом на активные переговоры.
+    Если да - обрабатывает через AI negotiator.
 
     Args:
         db: Database session
@@ -445,62 +445,60 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
     if not sender_id:
         return False
 
-    # First, check if this is a SELLER response
-    result = await db.execute(
-        select(Negotiation)
-        .options(selectinload(Negotiation.deal))
-        .where(
-            and_(
-                or_(
-                    Negotiation.seller_sender_id == sender_id,
-                    Negotiation.seller_chat_id == sender_id,
-                ),
-                Negotiation.stage.in_([
-                    NegotiationStage.INITIAL,
-                    NegotiationStage.CONTACTED,
-                    NegotiationStage.NEGOTIATING,
-                    NegotiationStage.WARM,
-                    NegotiationStage.HANDED_TO_MANAGER,
-                ]),
+    try:
+        # Проверяем, является ли это ответом ПРОДАВЦА
+        # Используем только стадии, которые не закрыты (не 'closed')
+        result = await db.execute(
+            select(Negotiation)
+            .options(selectinload(Negotiation.deal))
+            .where(
+                and_(
+                    or_(
+                        Negotiation.seller_sender_id == sender_id,
+                        Negotiation.seller_chat_id == sender_id,
+                    ),
+                    # Не используем .in_() с enum'ами которых может не быть в БД
+                    # Вместо этого исключаем только 'closed'
+                    Negotiation.stage != NegotiationStage.CLOSED,
+                )
             )
         )
-    )
-    negotiation = result.scalar_one_or_none()
+        negotiation = result.scalar_one_or_none()
 
-    if negotiation:
-        logger.info(f"Found active negotiation {negotiation.id} for seller {sender_id}")
-        await process_seller_response(negotiation, message_text, db)
-        return True
+        if negotiation:
+            logger.info(f"Найдены активные переговоры {negotiation.id} для продавца {sender_id}")
+            await process_seller_response(negotiation, message_text, db)
+            return True
 
-    # Then, check if this is a BUYER response
-    result = await db.execute(
-        select(Negotiation)
-        .options(selectinload(Negotiation.deal))
-        .join(DetectedDeal, Negotiation.deal_id == DetectedDeal.id)
-        .where(
-            and_(
-                or_(
-                    DetectedDeal.buyer_sender_id == sender_id,
-                    DetectedDeal.buyer_chat_id == sender_id,
-                ),
-                Negotiation.stage.in_([
-                    NegotiationStage.INITIAL,
-                    NegotiationStage.CONTACTED,
-                    NegotiationStage.NEGOTIATING,
-                    NegotiationStage.WARM,
-                    NegotiationStage.HANDED_TO_MANAGER,
-                ]),
+        # Проверяем, является ли это ответом ПОКУПАТЕЛЯ
+        result = await db.execute(
+            select(Negotiation)
+            .options(selectinload(Negotiation.deal))
+            .join(DetectedDeal, Negotiation.deal_id == DetectedDeal.id)
+            .where(
+                and_(
+                    or_(
+                        DetectedDeal.buyer_sender_id == sender_id,
+                        DetectedDeal.buyer_chat_id == sender_id,
+                    ),
+                    Negotiation.stage != NegotiationStage.CLOSED,
+                )
             )
         )
-    )
-    negotiation = result.scalar_one_or_none()
+        negotiation = result.scalar_one_or_none()
 
-    if negotiation:
-        logger.info(f"Found active negotiation {negotiation.id} for buyer {sender_id}")
-        await process_buyer_response(negotiation, message_text, db)
-        return True
+        if negotiation:
+            logger.info(f"Найдены активные переговоры {negotiation.id} для покупателя {sender_id}")
+            await process_buyer_response(negotiation, message_text, db)
+            return True
 
-    return False
+        return False
+
+    except Exception as e:
+        # Если ошибка с enum или БД - логируем и возвращаем False
+        # чтобы сообщение обработалось как новая заявка
+        logger.warning(f"Ошибка при проверке переговоров: {e}")
+        return False
 
 
 async def handle_new_message(event, telegram_service) -> None:
