@@ -1,0 +1,162 @@
+{% extends "panel/base.html" %}
+
+{% block page_title %}Профиль{% endblock %}
+
+{% block content %}
+<div class="profile-page">
+    <!-- Profile Info -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Мой профиль</h3>
+        </div>
+        <div class="card-body">
+            <div class="info-grid">
+                <div class="info-item">
+                    <label>Имя</label>
+                    <span id="displayName">-</span>
+                </div>
+                <div class="info-item">
+                    <label>Логин</label>
+                    <span id="username">-</span>
+                </div>
+                <div class="info-item">
+                    <label>Роль</label>
+                    <span id="role">-</span>
+                </div>
+                <div class="info-item">
+                    <label>Дата регистрации</label>
+                    <span id="createdAt">-</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Статистика</h3>
+        </div>
+        <div class="card-body">
+            <div class="stats-grid">
+                <div class="stat-card" title="Сделки, которые сейчас в вашей работе">
+                    <div class="stat-value" id="activeDeals">-</div>
+                    <div class="stat-label">Активных сделок</div>
+                </div>
+                <div class="stat-card" title="Количество завершённых сделок за текущий месяц">
+                    <div class="stat-value" id="closedMonth">-</div>
+                    <div class="stat-label">Закрыто за месяц</div>
+                </div>
+                <div class="stat-card" title="Процент выигранных сделок от общего числа закрытых. Чем выше, тем лучше!">
+                    <div class="stat-value" id="conversionRate">-</div>
+                    <div class="stat-label">Конверсия</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Change Password -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Сменить пароль</h3>
+        </div>
+        <div class="card-body">
+            <form id="passwordForm">
+                <div class="form-group">
+                    <label>Текущий пароль</label>
+                    <input type="password" id="currentPassword" required placeholder="Введите текущий пароль">
+                </div>
+                <div class="form-group">
+                    <label>Новый пароль</label>
+                    <input type="password" id="newPassword" required minlength="6" placeholder="Минимум 6 символов">
+                    <small class="form-hint">Пароль должен быть не менее 6 символов. Используйте буквы и цифры для надёжности.</small>
+                </div>
+                <div class="form-group">
+                    <label>Подтверждение пароля</label>
+                    <input type="password" id="confirmPassword" required placeholder="Повторите новый пароль">
+                </div>
+                <button type="submit" class="btn btn-primary">Изменить пароль</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', loadProfile);
+
+async function loadProfile() {
+    const response = await fetch('/api/panel/profile/data');
+    const data = await response.json();
+
+    document.getElementById('displayName').textContent = data.display_name;
+    document.getElementById('username').textContent = data.username;
+    document.getElementById('role').textContent = data.role === 'manager' ? 'Менеджер' : data.role;
+    document.getElementById('createdAt').textContent = formatDate(data.created_at);
+    document.getElementById('activeDeals').textContent = data.active_deals_count;
+    document.getElementById('closedMonth').textContent = data.closed_deals_month;
+    document.getElementById('conversionRate').textContent = data.conversion_rate + '%';
+}
+
+document.getElementById('passwordForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const currentPassword = document.getElementById('currentPassword').value;
+    const newPassword = document.getElementById('newPassword').value;
+    const confirmPassword = document.getElementById('confirmPassword').value;
+
+    if (newPassword !== confirmPassword) {
+        showNotification('Пароли не совпадают. Проверьте правильность ввода.', 'error');
+        return;
+    }
+
+    if (newPassword.length < 6) {
+        showNotification('Пароль должен быть не менее 6 символов.', 'error');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/panel/profile/password', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                current_password: currentPassword,
+                new_password: newPassword
+            })
+        });
+
+        if (response.ok) {
+            showNotification('Пароль успешно изменён!', 'success');
+            document.getElementById('passwordForm').reset();
+        } else {
+            const data = await response.json();
+            const errorMessages = {
+                'invalid_password': 'Неверный текущий пароль. Проверьте правильность ввода.',
+                'password_too_short': 'Новый пароль слишком короткий.'
+            };
+            showNotification(errorMessages[data.detail] || data.detail || 'Не удалось изменить пароль.', 'error');
+        }
+    } catch (error) {
+        showNotification('Ошибка сети. Проверьте подключение к интернету.', 'error');
+    }
+});
+
+function formatDate(dateStr) {
+    return new Date(dateStr).toLocaleDateString('ru-RU');
+}
+
+// Notification system
+function showNotification(message, type = 'info') {
+    const existing = document.querySelector('.notification');
+    if (existing) existing.remove();
+
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.innerHTML = `
+        <span>${message}</span>
+        <button onclick="this.parentElement.remove()" class="notification-close">&times;</button>
+    `;
+    document.body.appendChild(notification);
+
+    setTimeout(() => notification.remove(), 5000);
+}
+</script>
+{% endblock %}

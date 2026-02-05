@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Вход - Arbion{% endblock %}
+
+{% block body %}
+<div class="login-container">
+    <div class="login-card">
+        <div class="login-header">
+            <h1>Arbion</h1>
+            {% if manager_name %}
+            <p>Добро пожаловать, {{ manager_name }}</p>
+            {% else %}
+            <p>Система управления сделками</p>
+            {% endif %}
+        </div>
+
+        {% if error %}
+        <div class="error-message">{{ error }}</div>
+        {% endif %}
+
+        <form id="loginForm" class="login-form">
+            <div class="form-group">
+                <label for="username">Логин</label>
+                <input type="text" id="username" name="username" required autocomplete="username"
+                       value="{{ prefill_username or '' }}" {% if prefill_username %}readonly{% endif %}>
+                {% if prefill_username %}
+                <small class="form-hint">Ваш логин уже заполнен</small>
+                {% endif %}
+            </div>
+
+            <div class="form-group">
+                <label for="password">Пароль</label>
+                <input type="password" id="password" name="password" required autocomplete="current-password"
+                       {% if prefill_username %}autofocus{% endif %}>
+            </div>
+
+            <div id="errorMessage" class="error-message" style="display: none;"></div>
+
+            <button type="submit" class="btn btn-primary btn-block">
+                Войти
+            </button>
+        </form>
+    </div>
+</div>
+
+<script>
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const username = document.getElementById('username').value;
+    const password = document.getElementById('password').value;
+    const errorEl = document.getElementById('errorMessage');
+
+    errorEl.style.display = 'none';
+
+    try {
+        const response = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ username, password }),
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            window.location.href = data.redirect_url;
+        } else {
+            errorEl.textContent = data.detail || 'Ошибка входа';
+            errorEl.style.display = 'block';
+        }
+    } catch (error) {
+        errorEl.textContent = 'Ошибка соединения с сервером';
+        errorEl.style.display = 'block';
+    }
+});
+</script>
+{% endblock %}

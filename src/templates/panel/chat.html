@@ -1,0 +1,155 @@
+{% extends "panel/base.html" %}
+
+{% block page_title %}Чат с продавцом{% endblock %}
+
+{% block content %}
+<div class="chat-container">
+    <!-- Deal Info -->
+    <div class="chat-info">
+        <div class="info-item">
+            <label>Товар:</label>
+            <span id="dealProduct">-</span>
+        </div>
+        <div class="info-item">
+            <label>Цена:</label>
+            <span id="dealPrice">-</span>
+        </div>
+        <div class="info-item">
+            <label>Статус:</label>
+            <span id="dealStatus" class="badge">-</span>
+        </div>
+    </div>
+
+    <!-- Chat Messages -->
+    <div class="chat-messages" id="chatMessages">
+        <div class="loading">Загрузка...</div>
+    </div>
+
+    <!-- Chat Input -->
+    <div class="chat-input-area" id="chatInputArea">
+        <input type="text" id="messageInput" placeholder="Напишите сообщение...">
+        <button onclick="sendMessage()" class="btn btn-primary">Отправить</button>
+    </div>
+
+    <!-- Close Actions -->
+    <div class="chat-actions" id="chatActions">
+        <button onclick="closeDeal('won')" class="btn btn-success">Закрыть (Успех)</button>
+        <button onclick="closeDeal('lost')" class="btn btn-danger">Закрыть (Отказ)</button>
+    </div>
+</div>
+
+<script>
+const negotiationId = {{ negotiation_id }};
+let refreshInterval;
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadMessages();
+    refreshInterval = setInterval(loadMessages, 5000);
+});
+
+async function loadMessages() {
+    const response = await fetch(`/api/panel/chat/${negotiationId}/messages`);
+    const data = await response.json();
+
+    // Update info
+    document.getElementById('dealProduct').textContent = data.product;
+    document.getElementById('dealPrice').textContent = formatMoney(data.sell_price);
+    document.getElementById('dealStatus').textContent = getStatusLabel(data.deal_status);
+    document.getElementById('dealStatus').className = `badge badge-${data.deal_status}`;
+
+    // Check if closed
+    if (data.deal_status === 'won' || data.deal_status === 'lost') {
+        document.getElementById('chatInputArea').style.display = 'none';
+        document.getElementById('chatActions').style.display = 'none';
+        clearInterval(refreshInterval);
+    }
+
+    // Render messages
+    const container = document.getElementById('chatMessages');
+    if (data.messages.length === 0) {
+        container.innerHTML = '<div class="empty">Нет сообщений</div>';
+        return;
+    }
+
+    container.innerHTML = data.messages.map(msg => `
+        <div class="message message-${msg.role}">
+            <div class="message-header">
+                <span class="message-sender">${escapeHtml(msg.sender_name)}</span>
+                <span class="message-time">${formatTime(msg.created_at)}</span>
+            </div>
+            <div class="message-content">${escapeHtml(msg.content)}</div>
+        </div>
+    `).join('');
+
+    container.scrollTop = container.scrollHeight;
+}
+
+async function sendMessage() {
+    const input = document.getElementById('messageInput');
+    const content = input.value.trim();
+    if (!content) return;
+
+    const response = await fetch(`/api/panel/chat/${negotiationId}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content })
+    });
+
+    if (response.ok) {
+        input.value = '';
+        loadMessages();
+    } else {
+        const data = await response.json();
+        alert(data.detail || 'Ошибка');
+    }
+}
+
+async function closeDeal(status) {
+    const resolution = prompt('Комментарий (опционально):');
+
+    const response = await fetch(`/api/panel/chat/${negotiationId}/close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, resolution })
+    });
+
+    if (response.ok) {
+        loadMessages();
+        alert('Сделка закрыта');
+    } else {
+        const data = await response.json();
+        alert(data.detail || 'Ошибка');
+    }
+}
+
+function getStatusLabel(status) {
+    const labels = {
+        'cold': 'Cold',
+        'in_progress': 'В процессе',
+        'warm': 'Warm',
+        'handed_to_manager': 'В работе',
+        'won': 'Выиграна',
+        'lost': 'Проиграна'
+    };
+    return labels[status] || status;
+}
+
+function formatMoney(value) {
+    return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(value);
+}
+
+function formatTime(dateStr) {
+    return new Date(dateStr).toLocaleString('ru-RU');
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+document.getElementById('messageInput').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') sendMessage();
+});
+</script>
+{% endblock %}

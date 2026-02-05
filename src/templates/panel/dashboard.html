@@ -1,0 +1,195 @@
+{% extends "panel/base.html" %}
+
+{% block page_title %}Главная{% endblock %}
+
+{% block content %}
+<!-- Stats Cards -->
+<div class="metrics-grid">
+    <div class="metric-card" title="Сделки, которые сейчас в вашей работе">
+        <div class="metric-title">Мои активные сделки</div>
+        <div class="metric-value" id="activeDeals">-</div>
+    </div>
+    <div class="metric-card" title="Количество завершённых сделок за текущий месяц">
+        <div class="metric-title">Закрыто за месяц</div>
+        <div class="metric-value" id="closedMonth">-</div>
+    </div>
+    <div class="metric-card" title="Процент выигранных сделок от общего числа закрытых">
+        <div class="metric-title">Конверсия</div>
+        <div class="metric-value" id="conversionRate">-</div>
+    </div>
+    <div class="metric-card metric-card-accent" title="Тёплые лиды, доступные для взятия в работу">
+        <div class="metric-title">Доступно в пуле</div>
+        <div class="metric-value" id="warmPool">-</div>
+    </div>
+</div>
+
+<!-- Help tooltips -->
+<div class="help-bar">
+    <span class="help-item" title="Тёплая сделка — AI провёл переговоры, продавец заинтересован. Готово для закрытия менеджером.">🔥 Тёплая сделка</span>
+    <span class="help-item" title="Конверсия — % выигранных сделок от общего числа закрытых. Чем выше, тем лучше!">📊 Конверсия</span>
+    <span class="help-item" title="Нажмите 'Взять в работу', чтобы начать работу со сделкой">✅ Как взять сделку</span>
+</div>
+
+<!-- Warm Leads Pool -->
+<div class="card" id="poolSection">
+    <div class="card-header">
+        <h3>Тёплые лиды в пуле</h3>
+    </div>
+    <div class="card-body">
+        <p class="card-description">Это сделки, где AI уже провёл переговоры с продавцом. Продавец заинтересован — осталось только закрыть сделку!</p>
+        <div class="deals-grid" id="poolDeals">
+            <div class="loading">Загрузка...</div>
+        </div>
+    </div>
+</div>
+
+<!-- My Active Deals -->
+<div class="card">
+    <div class="card-header">
+        <h3>Мои активные сделки</h3>
+    </div>
+    <div class="card-body">
+        <div class="deals-grid" id="myDeals">
+            <div class="loading">Загрузка...</div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    loadStats();
+    loadPool();
+    loadMyDeals();
+});
+
+async function loadStats() {
+    const response = await fetch('/api/panel/stats');
+    const data = await response.json();
+
+    document.getElementById('activeDeals').textContent = data.active_deals;
+    document.getElementById('closedMonth').textContent = data.closed_this_month;
+    document.getElementById('conversionRate').textContent = data.conversion_rate + '%';
+    document.getElementById('warmPool').textContent = data.warm_leads_in_pool;
+}
+
+async function loadPool() {
+    const response = await fetch('/api/panel/pool');
+    const data = await response.json();
+
+    const container = document.getElementById('poolDeals');
+
+    if (data.items.length === 0) {
+        container.innerHTML = '<div class="empty">Нет доступных лидов</div>';
+        return;
+    }
+
+    container.innerHTML = data.items.map(deal => `
+        <div class="deal-card deal-card-warm">
+            <div class="deal-header">
+                <span class="deal-product">${escapeHtml(deal.product)}</span>
+                <span class="badge badge-warm">Тёплая</span>
+            </div>
+            <div class="deal-price">${formatMoney(deal.sell_price)}</div>
+            <div class="deal-region">${deal.region || 'Регион не указан'}</div>
+            <div class="deal-actions">
+                ${deal.can_take ?
+                    `<button onclick="takeDeal(${deal.id})" class="btn btn-primary btn-sm">Взять в работу</button>` :
+                    `<button class="btn btn-sm" disabled title="${deal.take_blocked_reason}">Недоступно</button>`
+                }
+            </div>
+        </div>
+    `).join('');
+}
+
+async function loadMyDeals() {
+    const response = await fetch('/api/panel/deals/list?include_pool=false');
+    const data = await response.json();
+
+    const container = document.getElementById('myDeals');
+
+    if (data.items.length === 0) {
+        container.innerHTML = '<div class="empty">У вас нет активных сделок</div>';
+        return;
+    }
+
+    container.innerHTML = data.items.map(deal => `
+        <div class="deal-card">
+            <div class="deal-header">
+                <span class="deal-product">${escapeHtml(deal.product)}</span>
+                <span class="badge badge-${deal.status}">${getStatusLabel(deal.status)}</span>
+            </div>
+            <div class="deal-price">${formatMoney(deal.sell_price)}</div>
+            <div class="deal-region">${deal.region || 'Регион не указан'}</div>
+            <div class="deal-actions">
+                ${deal.negotiation_id ?
+                    `<a href="/panel/chat/${deal.negotiation_id}" class="btn btn-primary btn-sm">Открыть чат</a>` :
+                    '<span class="text-muted">Нет переписки</span>'
+                }
+            </div>
+        </div>
+    `).join('');
+}
+
+async function takeDeal(dealId) {
+    try {
+        const response = await fetch(`/api/panel/deals/${dealId}/take`, { method: 'POST' });
+        const data = await response.json();
+
+        if (response.ok) {
+            showNotification('Сделка успешно взята в работу! Откройте чат для связи с продавцом.', 'success');
+            loadStats();
+            loadPool();
+            loadMyDeals();
+        } else {
+            const errorMessages = {
+                'deal_not_found': 'Сделка не найдена. Возможно, её уже взял другой менеджер.',
+                'deal_already_taken': 'Эта сделка уже взята другим менеджером.',
+                'max_deals_reached': 'Вы достигли лимита активных сделок. Закройте текущие сделки, чтобы взять новые.',
+                'deal_not_warm': 'Эта сделка ещё не готова для передачи менеджеру.'
+            };
+            showNotification(errorMessages[data.detail] || data.detail || 'Не удалось взять сделку. Попробуйте позже.', 'error');
+        }
+    } catch (error) {
+        showNotification('Ошибка сети. Проверьте подключение к интернету.', 'error');
+    }
+}
+
+function getStatusLabel(status) {
+    const labels = {
+        'cold': 'Холодная',
+        'in_progress': 'В процессе',
+        'warm': 'Тёплая',
+        'handed_to_manager': 'В работе',
+        'won': 'Выиграна',
+        'lost': 'Проиграна'
+    };
+    return labels[status] || status;
+}
+
+function formatMoney(value) {
+    return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(value);
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Notification system
+function showNotification(message, type = 'info') {
+    const existing = document.querySelector('.notification');
+    if (existing) existing.remove();
+
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.innerHTML = `
+        <span>${message}</span>
+        <button onclick="this.parentElement.remove()" class="notification-close">&times;</button>
+    `;
+    document.body.appendChild(notification);
+
+    setTimeout(() => notification.remove(), 5000);
+}
+</script>
+{% endblock %}

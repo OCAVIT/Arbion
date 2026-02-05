@@ -1,0 +1,138 @@
+{% extends "panel/base.html" %}
+
+{% block page_title %}Мои сделки{% endblock %}
+
+{% block content %}
+<!-- Help tooltips -->
+<div class="help-bar">
+    <span class="help-item" title="Тёплая — AI провёл переговоры, продавец заинтересован">🔥 Тёплая</span>
+    <span class="help-item" title="В работе — сделка передана вам для закрытия">👤 В работе</span>
+    <span class="help-item" title="Выиграна — сделка успешно закрыта">✅ Выиграна</span>
+    <span class="help-item" title="Проиграна — сделка не состоялась">❌ Проиграна</span>
+</div>
+
+<!-- Deals Grid -->
+<div class="deals-grid" id="dealsGrid">
+    <div class="loading">Загрузка...</div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', loadDeals);
+
+async function loadDeals() {
+    const response = await fetch('/api/panel/deals/list?include_pool=true');
+    const data = await response.json();
+
+    const container = document.getElementById('dealsGrid');
+
+    if (data.items.length === 0) {
+        container.innerHTML = '<div class="empty">Нет сделок</div>';
+        return;
+    }
+
+    container.innerHTML = data.items.map(deal => `
+        <div class="deal-card ${deal.can_take ? 'deal-card-warm' : ''}">
+            <div class="deal-header">
+                <span class="deal-product">${escapeHtml(deal.product)}</span>
+                <span class="badge badge-${deal.status}">${getStatusLabel(deal.status)}</span>
+            </div>
+            <div class="deal-price">${formatMoney(deal.sell_price)}</div>
+            <div class="deal-region">${deal.region || 'Регион не указан'}</div>
+            ${deal.seller_contact ? `
+                <div class="deal-contact">
+                    <span class="contact-label">Контакт продавца:</span>
+                    <a href="tel:${escapeHtml(deal.seller_contact)}" class="contact-phone">${escapeHtml(deal.seller_contact)}</a>
+                    <button onclick="copyContact('${escapeHtml(deal.seller_contact)}')" class="btn btn-sm btn-outline copy-btn" title="Копировать">📋</button>
+                </div>
+            ` : ''}
+            <div class="deal-meta">
+                <span>Сообщений: ${deal.messages_count}</span>
+            </div>
+            <div class="deal-actions">
+                ${deal.can_take && deal.status === 'warm' ?
+                    `<button onclick="takeDeal(${deal.id})" class="btn btn-success btn-sm">Взять в работу</button>` :
+                    deal.negotiation_id ?
+                        `<a href="/panel/chat/${deal.negotiation_id}" class="btn btn-primary btn-sm">Открыть чат</a>` :
+                        '<span class="text-muted">Нет переписки</span>'
+                }
+            </div>
+        </div>
+    `).join('');
+}
+
+async function takeDeal(dealId) {
+    try {
+        const response = await fetch(`/api/panel/deals/${dealId}/take`, { method: 'POST' });
+        const data = await response.json();
+
+        if (response.ok) {
+            showNotification('Сделка успешно взята в работу!', 'success');
+            loadDeals();
+        } else {
+            const errorMessages = {
+                'deal_not_found': 'Сделка не найдена. Возможно, её уже взял другой менеджер.',
+                'deal_already_taken': 'Эта сделка уже взята другим менеджером.',
+                'max_deals_reached': 'Вы достигли лимита активных сделок. Закройте текущие сделки, чтобы взять новые.',
+                'deal_not_warm': 'Эта сделка ещё не готова для передачи менеджеру.'
+            };
+            showNotification(errorMessages[data.detail] || data.detail || 'Не удалось взять сделку.', 'error');
+        }
+    } catch (error) {
+        showNotification('Ошибка сети. Проверьте подключение к интернету.', 'error');
+    }
+}
+
+function getStatusLabel(status) {
+    const labels = {
+        'cold': 'Холодная',
+        'in_progress': 'В процессе',
+        'warm': 'Тёплая',
+        'handed_to_manager': 'В работе',
+        'won': 'Выиграна',
+        'lost': 'Проиграна'
+    };
+    return labels[status] || status;
+}
+
+function formatMoney(value) {
+    return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(value);
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function copyContact(contact) {
+    navigator.clipboard.writeText(contact).then(() => {
+        showNotification('Контакт скопирован', 'success');
+    }).catch(() => {
+        // Fallback
+        const textarea = document.createElement('textarea');
+        textarea.value = contact;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        showNotification('Контакт скопирован', 'success');
+    });
+}
+
+// Notification system
+function showNotification(message, type = 'info') {
+    const existing = document.querySelector('.notification');
+    if (existing) existing.remove();
+
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.innerHTML = `
+        <span>${message}</span>
+        <button onclick="this.parentElement.remove()" class="notification-close">&times;</button>
+    `;
+    document.body.appendChild(notification);
+
+    setTimeout(() => notification.remove(), 5000);
+}
+</script>
+{% endblock %}

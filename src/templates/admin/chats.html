@@ -1,0 +1,249 @@
+{% extends "admin/base.html" %}
+
+{% block page_title %}Управление чатами{% endblock %}
+
+{% block header_actions %}
+<button onclick="showAddSeedModal()" class="btn btn-primary">+ Добавить seed-запрос</button>
+{% endblock %}
+
+{% block content %}
+<!-- Stats Bar -->
+<div class="stats-bar">
+    <div class="stat-item">
+        <span class="stat-label">Активных:</span>
+        <span class="stat-value text-success" id="activeChats">-</span>
+    </div>
+    <div class="stat-item">
+        <span class="stat-label">На испытании:</span>
+        <span class="stat-value text-warning" id="probationChats">-</span>
+    </div>
+    <div class="stat-item">
+        <span class="stat-label">Покинуто:</span>
+        <span class="stat-value text-muted" id="leftChats">-</span>
+    </div>
+    <div class="stat-item">
+        <span class="stat-label">Цель:</span>
+        <input type="number" id="targetInput" class="stat-input" min="0" max="10000">
+        <button onclick="saveTarget()" class="btn btn-sm">Сохранить</button>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="filters-bar">
+    <select id="statusFilter" onchange="loadChats()">
+        <option value="">Все статусы</option>
+        <option value="active">Активные</option>
+        <option value="probation">На испытании</option>
+        <option value="left">Покинутые</option>
+        <option value="blacklisted">Заблокированные</option>
+    </select>
+    <input type="text" id="searchInput" placeholder="Поиск по названию..." onkeyup="loadChats()">
+    <select id="sortBy" onchange="loadChats()">
+        <option value="useful_ratio">По полезности</option>
+        <option value="orders_found">По заявкам</option>
+        <option value="deals_created">По сделкам</option>
+        <option value="joined_at">По дате</option>
+    </select>
+</div>
+
+<!-- Help tooltips -->
+<div class="help-bar">
+    <span class="help-item" title="Активные — бот состоит в чате и парсит сообщения">✅ Активные</span>
+    <span class="help-item" title="На испытании — недавно добавленный чат, оценивается полезность">⏳ На испытании</span>
+    <span class="help-item" title="Полезность — % сообщений с потенциальными заявками от общего числа">📊 Полезность</span>
+    <span class="help-item" title="Seed-запрос — поисковая фраза для поиска новых чатов в Telegram">🔍 Seed-запрос</span>
+</div>
+
+<!-- Chats Table -->
+<div class="table-container">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Название</th>
+                <th>Участников</th>
+                <th>Статус</th>
+                <th>Полезность</th>
+                <th>Заявок</th>
+                <th>Сделок</th>
+                <th>Дата вступления</th>
+                <th>Источник</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody id="chatsTableBody">
+            <tr><td colspan="9" class="loading">Загрузка...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- Pagination -->
+<div class="pagination" id="pagination"></div>
+
+<!-- Add Seed Modal -->
+<div id="seedModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Добавить seed-запрос</h3>
+            <button onclick="closeSeedModal()" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>Поисковый запрос</label>
+                <input type="text" id="seedQuery" placeholder="Например: купить iPhone Москва">
+                <small class="form-hint">Бот будет искать чаты в Telegram по этому запросу и автоматически вступать в них для поиска заявок.</small>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeSeedModal()" class="btn btn-outline">Отмена</button>
+            <button onclick="addSeed()" class="btn btn-primary">Добавить</button>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentPage = 1;
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadStats();
+    loadChats();
+});
+
+async function loadStats() {
+    const response = await fetch('/api/admin/chats/stats');
+    const data = await response.json();
+
+    document.getElementById('activeChats').textContent = data.active_chats;
+    document.getElementById('probationChats').textContent = data.probation_chats;
+    document.getElementById('leftChats').textContent = data.left_chats;
+    document.getElementById('targetInput').value = data.target_chat_count;
+}
+
+async function loadChats() {
+    const status = document.getElementById('statusFilter').value;
+    const search = document.getElementById('searchInput').value;
+    const sortBy = document.getElementById('sortBy').value;
+
+    const params = new URLSearchParams({
+        page: currentPage,
+        per_page: 20,
+        sort_by: sortBy,
+        sort_order: 'desc'
+    });
+    if (status) params.append('status', status);
+    if (search) params.append('search', search);
+
+    const response = await fetch(`/api/admin/chats/list?${params}`);
+    const data = await response.json();
+
+    renderChats(data.items);
+    renderPagination(data.total, data.page, data.pages);
+}
+
+function getStatusLabel(status) {
+    const labels = {
+        'active': 'Активный',
+        'probation': 'На испытании',
+        'left': 'Покинут',
+        'blacklisted': 'Заблокирован'
+    };
+    return labels[status] || status;
+}
+
+function renderChats(chats) {
+    const tbody = document.getElementById('chatsTableBody');
+
+    if (chats.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="empty">Нет чатов</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = chats.map(chat => `
+        <tr>
+            <td>${escapeHtml(chat.title)}</td>
+            <td>${chat.member_count}</td>
+            <td><span class="badge badge-${chat.status}">${getStatusLabel(chat.status)}</span></td>
+            <td title="Процент полезных сообщений">${chat.useful_ratio.toFixed(1)}%</td>
+            <td>${chat.orders_found}</td>
+            <td>${chat.deals_created}</td>
+            <td>${formatDate(chat.joined_at)}</td>
+            <td>${chat.source}</td>
+            <td class="actions">
+                ${chat.status !== 'left' ? `<button onclick="leaveChat(${chat.id})" class="btn btn-sm btn-outline">Покинуть</button>` : ''}
+                ${chat.status !== 'blacklisted' ? `<button onclick="blacklistChat(${chat.id})" class="btn btn-sm btn-danger">Блок</button>` : ''}
+            </td>
+        </tr>
+    `).join('');
+}
+
+async function saveTarget() {
+    const target = document.getElementById('targetInput').value;
+    await fetch('/api/admin/chats/target?target=' + target, { method: 'POST' });
+    loadStats();
+}
+
+async function leaveChat(id) {
+    if (!confirm('Покинуть этот чат?')) return;
+    await fetch(`/api/admin/chats/${id}/leave`, { method: 'POST' });
+    loadChats();
+    loadStats();
+}
+
+async function blacklistChat(id) {
+    if (!confirm('Заблокировать этот чат навсегда?')) return;
+    await fetch(`/api/admin/chats/${id}/blacklist`, { method: 'POST' });
+    loadChats();
+    loadStats();
+}
+
+function showAddSeedModal() {
+    document.getElementById('seedModal').style.display = 'flex';
+}
+
+function closeSeedModal() {
+    document.getElementById('seedModal').style.display = 'none';
+    document.getElementById('seedQuery').value = '';
+}
+
+async function addSeed() {
+    const query = document.getElementById('seedQuery').value.trim();
+    if (!query) return;
+
+    await fetch('/api/admin/seeds', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query })
+    });
+    closeSeedModal();
+}
+
+function renderPagination(total, page, pages) {
+    // Simple pagination
+    const container = document.getElementById('pagination');
+    if (pages <= 1) {
+        container.innerHTML = '';
+        return;
+    }
+
+    let html = '';
+    for (let i = 1; i <= pages; i++) {
+        html += `<button class="btn btn-sm ${i === page ? 'btn-primary' : 'btn-outline'}" onclick="goToPage(${i})">${i}</button>`;
+    }
+    container.innerHTML = html;
+}
+
+function goToPage(page) {
+    currentPage = page;
+    loadChats();
+}
+
+function formatDate(dateStr) {
+    return new Date(dateStr).toLocaleDateString('ru-RU');
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+{% endblock %}

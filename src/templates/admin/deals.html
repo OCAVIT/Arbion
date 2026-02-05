@@ -1,0 +1,127 @@
+{% extends "admin/base.html" %}
+
+{% block page_title %}Сделки{% endblock %}
+
+{% block content %}
+<!-- Filters -->
+<div class="filters-bar">
+    <select id="statusFilter" onchange="loadDeals()">
+        <option value="">Все статусы</option>
+        <option value="cold">Холодная</option>
+        <option value="in_progress">В процессе</option>
+        <option value="warm">Тёплая</option>
+        <option value="handed_to_manager">У менеджера</option>
+        <option value="won">Выиграна</option>
+        <option value="lost">Проиграна</option>
+    </select>
+    <input type="text" id="productFilter" placeholder="Поиск по товару..." onkeyup="loadDeals()">
+</div>
+
+<!-- Help tooltips -->
+<div class="help-bar">
+    <span class="help-item" title="Холодная — найден потенциальный матч, переговоры не начаты">❄️ Холодная</span>
+    <span class="help-item" title="Тёплая — AI провёл переговоры, продавец заинтересован">🔥 Тёплая</span>
+    <span class="help-item" title="Маржа — разница между ценой продажи и покупки">📊 Маржа</span>
+    <span class="help-item" title="Профит — итоговая прибыль после закрытия сделки">💰 Профит</span>
+</div>
+
+<!-- Deals Table -->
+<div class="table-container">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Товар</th>
+                <th>Покупка</th>
+                <th>Продажа</th>
+                <th>Маржа</th>
+                <th>Профит</th>
+                <th>Статус</th>
+                <th>Менеджер</th>
+                <th>Дата</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody id="dealsTableBody">
+            <tr><td colspan="10" class="loading">Загрузка...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- Pagination -->
+<div class="pagination" id="pagination"></div>
+
+<script>
+let currentPage = 1;
+
+document.addEventListener('DOMContentLoaded', loadDeals);
+
+async function loadDeals() {
+    const status = document.getElementById('statusFilter').value;
+    const product = document.getElementById('productFilter').value;
+
+    const params = new URLSearchParams({ page: currentPage, per_page: 20 });
+    if (status) params.append('status', status);
+    if (product) params.append('product', product);
+
+    const response = await fetch(`/api/admin/deals/list?${params}`);
+    const data = await response.json();
+
+    renderDeals(data.items);
+    renderPagination(data.total, data.page, data.pages);
+}
+
+function getStatusLabel(status) {
+    const labels = {
+        'cold': 'Холодная',
+        'in_progress': 'В процессе',
+        'warm': 'Тёплая',
+        'handed_to_manager': 'У менеджера',
+        'won': 'Выиграна',
+        'lost': 'Проиграна'
+    };
+    return labels[status] || status;
+}
+
+function renderDeals(deals) {
+    const tbody = document.getElementById('dealsTableBody');
+
+    if (deals.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" class="empty">Нет сделок</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = deals.map(deal => `
+        <tr onclick="window.location='/admin/deals/${deal.id}'" style="cursor:pointer">
+            <td>${deal.id}</td>
+            <td>${escapeHtml(deal.product)}</td>
+            <td class="text-success">${formatMoney(deal.buy_price)}</td>
+            <td class="text-warning">${formatMoney(deal.sell_price)}</td>
+            <td>${formatMoney(deal.margin)}</td>
+            <td class="text-success">${deal.profit ? formatMoney(deal.profit) : '-'}</td>
+            <td><span class="badge badge-${deal.status}">${getStatusLabel(deal.status)}</span></td>
+            <td>${deal.manager_name || '-'}</td>
+            <td>${formatDate(deal.created_at)}</td>
+            <td class="actions" onclick="event.stopPropagation()">
+                <button onclick="window.location='/admin/deals/${deal.id}'" class="btn btn-sm btn-outline">Открыть</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function renderPagination(total, page, pages) {
+    const container = document.getElementById('pagination');
+    if (pages <= 1) { container.innerHTML = ''; return; }
+    let html = '';
+    for (let i = 1; i <= Math.min(pages, 10); i++) {
+        html += `<button class="btn btn-sm ${i === page ? 'btn-primary' : 'btn-outline'}" onclick="goToPage(${i})">${i}</button>`;
+    }
+    container.innerHTML = html;
+}
+
+function goToPage(page) { currentPage = page; loadDeals(); }
+function formatDate(dateStr) { return new Date(dateStr).toLocaleDateString('ru-RU'); }
+function formatMoney(value) { return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(value); }
+function escapeHtml(text) { const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
+</script>
+{% endblock %}

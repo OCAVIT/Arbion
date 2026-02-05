@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block body %}
+<div class="app-container">
+    <!-- Mobile Header -->
+    <header class="mobile-header">
+        <h2>Arbion</h2>
+        <button class="hamburger" onclick="toggleSidebar()" aria-label="Меню">☰</button>
+    </header>
+
+    <!-- Mobile Overlay -->
+    <div class="mobile-overlay" onclick="closeSidebar()"></div>
+
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <h2>Arbion</h2>
+            <span class="badge badge-owner">Owner</span>
+        </div>
+
+        <nav class="sidebar-nav">
+            <a href="/admin" class="nav-item {% if request.url.path == '/admin' %}active{% endif %}">
+                <span class="nav-icon">&#9776;</span>
+                <span>Дашборд</span>
+            </a>
+            <a href="/admin/chats" class="nav-item {% if '/chats' in request.url.path %}active{% endif %}">
+                <span class="nav-icon">&#128172;</span>
+                <span>Чаты</span>
+            </a>
+            <a href="/admin/orders" class="nav-item {% if '/orders' in request.url.path %}active{% endif %}">
+                <span class="nav-icon">&#128203;</span>
+                <span>Заявки</span>
+            </a>
+            <a href="/admin/deals" class="nav-item {% if '/deals' in request.url.path %}active{% endif %}">
+                <span class="nav-icon">&#128176;</span>
+                <span>Сделки</span>
+            </a>
+            <a href="/admin/managers" class="nav-item {% if '/managers' in request.url.path %}active{% endif %}">
+                <span class="nav-icon">&#128101;</span>
+                <span>Менеджеры</span>
+            </a>
+            <a href="/admin/finance" class="nav-item {% if '/finance' in request.url.path %}active{% endif %}">
+                <span class="nav-icon">&#128181;</span>
+                <span>Финансы</span>
+            </a>
+            <a href="/admin/audit" class="nav-item {% if '/audit' in request.url.path %}active{% endif %}">
+                <span class="nav-icon">&#128269;</span>
+                <span>Аудит</span>
+            </a>
+            <a href="/admin/settings" class="nav-item {% if '/settings' in request.url.path %}active{% endif %}">
+                <span class="nav-icon">&#9881;</span>
+                <span>Настройки</span>
+            </a>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="user-info">
+                <span>{{ user.display_name }}</span>
+            </div>
+            <button onclick="logout()" class="btn btn-sm btn-outline">Выход</button>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <header class="content-header">
+            <h1>{% block page_title %}Дашборд{% endblock %}</h1>
+            {% block header_actions %}{% endblock %}
+        </header>
+
+        <div class="content-body">
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+</div>
+
+<script>
+async function logout() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.href = '/login';
+}
+
+// Mobile sidebar toggle
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.querySelector('.mobile-overlay');
+    sidebar.classList.toggle('open');
+    overlay.classList.toggle('active');
+}
+
+function closeSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.querySelector('.mobile-overlay');
+    sidebar.classList.remove('open');
+    overlay.classList.remove('active');
+}
+
+// Close sidebar when clicking on a nav link (mobile)
+document.querySelectorAll('.nav-item').forEach(item => {
+    item.addEventListener('click', () => {
+        if (window.innerWidth <= 768) {
+            closeSidebar();
+        }
+    });
+});
+
+// Close sidebar on escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        closeSidebar();
+    }
+});
+</script>
+{% endblock %}

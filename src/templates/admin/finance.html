@@ -1,0 +1,96 @@
+{% extends "admin/base.html" %}
+
+{% block page_title %}Финансы{% endblock %}
+
+{% block content %}
+<!-- Summary Cards -->
+<div class="metrics-grid">
+    <div class="metric-card metric-card-accent">
+        <div class="metric-title">Общий профит</div>
+        <div class="metric-value text-success" id="totalProfit">-</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-title">Сегодня</div>
+        <div class="metric-value" id="profitToday">-</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-title">Неделя</div>
+        <div class="metric-value" id="profitWeek">-</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-title">Месяц</div>
+        <div class="metric-value" id="profitMonth">-</div>
+    </div>
+</div>
+
+<!-- Ledger Table -->
+<div class="card">
+    <div class="card-header">
+        <h3>Журнал операций</h3>
+    </div>
+    <div class="card-body">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Сделка</th>
+                    <th>Товар</th>
+                    <th>Покупка</th>
+                    <th>Продажа</th>
+                    <th>Профит</th>
+                    <th>Закрыл</th>
+                    <th>Дата</th>
+                </tr>
+            </thead>
+            <tbody id="ledgerTableBody">
+                <tr><td colspan="8" class="loading">Загрузка...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    loadSummary();
+    loadLedger();
+});
+
+async function loadSummary() {
+    const response = await fetch('/api/admin/finance/summary');
+    const data = await response.json();
+
+    document.getElementById('totalProfit').textContent = formatMoney(data.total_profit);
+    document.getElementById('profitToday').textContent = formatMoney(data.profit_by_period.today);
+    document.getElementById('profitWeek').textContent = formatMoney(data.profit_by_period.week);
+    document.getElementById('profitMonth').textContent = formatMoney(data.profit_by_period.month);
+}
+
+async function loadLedger() {
+    const response = await fetch('/api/admin/finance/ledger');
+    const data = await response.json();
+
+    const tbody = document.getElementById('ledgerTableBody');
+    if (data.items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="empty">Нет записей</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = data.items.map(entry => `
+        <tr>
+            <td>${entry.id}</td>
+            <td><a href="/admin/deals/${entry.deal_id}">#${entry.deal_id}</a></td>
+            <td>${escapeHtml(entry.product)}</td>
+            <td>${formatMoney(entry.buy_amount)}</td>
+            <td>${formatMoney(entry.sell_amount)}</td>
+            <td class="text-success">${formatMoney(entry.profit)}</td>
+            <td>${escapeHtml(entry.closed_by)}</td>
+            <td>${formatDate(entry.closed_at)}</td>
+        </tr>
+    `).join('');
+}
+
+function formatDate(dateStr) { return new Date(dateStr).toLocaleDateString('ru-RU'); }
+function formatMoney(value) { return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(value); }
+function escapeHtml(text) { const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
+</script>
+{% endblock %}

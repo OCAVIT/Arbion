@@ -1,0 +1,137 @@
+{% extends "admin/base.html" %}
+
+{% block page_title %}Заявки{% endblock %}
+
+{% block content %}
+<!-- Filters -->
+<div class="filters-bar">
+    <select id="typeFilter" onchange="loadOrders()">
+        <option value="">Все типы</option>
+        <option value="buy">Покупка</option>
+        <option value="sell">Продажа</option>
+    </select>
+    <input type="text" id="productFilter" placeholder="Товар..." onkeyup="loadOrders()">
+    <input type="text" id="regionFilter" placeholder="Регион..." onkeyup="loadOrders()">
+    <label class="checkbox-label">
+        <input type="checkbox" id="activeOnly" checked onchange="loadOrders()">
+        Только активные
+    </label>
+</div>
+
+<!-- Orders Table -->
+<div class="table-container">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Тип</th>
+                <th>Товар</th>
+                <th>Цена</th>
+                <th>Количество</th>
+                <th>Регион</th>
+                <th>Чат</th>
+                <th>Дата</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody id="ordersTableBody">
+            <tr><td colspan="9" class="loading">Загрузка...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- Pagination -->
+<div class="pagination" id="pagination"></div>
+
+<script>
+let currentPage = 1;
+
+document.addEventListener('DOMContentLoaded', loadOrders);
+
+async function loadOrders() {
+    const type = document.getElementById('typeFilter').value;
+    const product = document.getElementById('productFilter').value;
+    const region = document.getElementById('regionFilter').value;
+    const activeOnly = document.getElementById('activeOnly').checked;
+
+    const params = new URLSearchParams({
+        page: currentPage,
+        per_page: 20,
+        active_only: activeOnly
+    });
+    if (type) params.append('type', type);
+    if (product) params.append('product', product);
+    if (region) params.append('region', region);
+
+    const response = await fetch(`/api/admin/orders/list?${params}`);
+    const data = await response.json();
+
+    renderOrders(data.items);
+    renderPagination(data.total, data.page, data.pages);
+}
+
+function renderOrders(orders) {
+    const tbody = document.getElementById('ordersTableBody');
+
+    if (orders.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="empty">Нет заявок</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = orders.map(order => `
+        <tr>
+            <td>${order.id}</td>
+            <td><span class="badge badge-${order.order_type}">${order.order_type === 'buy' ? 'Покупка' : 'Продажа'}</span></td>
+            <td>${escapeHtml(order.product)}</td>
+            <td>${order.price ? formatMoney(order.price) : '-'}</td>
+            <td>${order.quantity || '-'}</td>
+            <td>${order.region || '-'}</td>
+            <td>${order.chat_title || '-'}</td>
+            <td>${formatDate(order.created_at)}</td>
+            <td class="actions">
+                <button onclick="deleteOrder(${order.id})" class="btn btn-sm btn-danger">Удалить</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+async function deleteOrder(id) {
+    if (!confirm('Удалить эту заявку?')) return;
+    await fetch(`/api/admin/orders/${id}`, { method: 'DELETE' });
+    loadOrders();
+}
+
+function renderPagination(total, page, pages) {
+    const container = document.getElementById('pagination');
+    if (pages <= 1) {
+        container.innerHTML = '';
+        return;
+    }
+
+    let html = '';
+    for (let i = 1; i <= Math.min(pages, 10); i++) {
+        html += `<button class="btn btn-sm ${i === page ? 'btn-primary' : 'btn-outline'}" onclick="goToPage(${i})">${i}</button>`;
+    }
+    container.innerHTML = html;
+}
+
+function goToPage(page) {
+    currentPage = page;
+    loadOrders();
+}
+
+function formatDate(dateStr) {
+    return new Date(dateStr).toLocaleDateString('ru-RU');
+}
+
+function formatMoney(value) {
+    return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(value);
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+{% endblock %}

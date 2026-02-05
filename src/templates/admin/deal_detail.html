@@ -1,0 +1,192 @@
+{% extends "admin/base.html" %}
+
+{% block page_title %}Сделка #{{ deal_id }}{% endblock %}
+
+{% block content %}
+<div class="deal-detail">
+    <!-- Deal Info -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Информация о сделке</h3>
+            <span class="badge" id="dealStatus">-</span>
+        </div>
+        <div class="card-body">
+            <div class="info-grid">
+                <div class="info-item">
+                    <label>Товар</label>
+                    <span id="dealProduct">-</span>
+                </div>
+                <div class="info-item">
+                    <label>Регион</label>
+                    <span id="dealRegion">-</span>
+                </div>
+                <div class="info-item">
+                    <label>Цена покупки</label>
+                    <span class="text-success" id="dealBuyPrice">-</span>
+                </div>
+                <div class="info-item">
+                    <label>Цена продажи</label>
+                    <span class="text-warning" id="dealSellPrice">-</span>
+                </div>
+                <div class="info-item">
+                    <label>Маржа</label>
+                    <span id="dealMargin">-</span>
+                </div>
+                <div class="info-item">
+                    <label>Профит</label>
+                    <span class="text-success" id="dealProfit">-</span>
+                </div>
+                <div class="info-item">
+                    <label>Менеджер</label>
+                    <span id="dealManager">-</span>
+                </div>
+                <div class="info-item">
+                    <label>AI Insight</label>
+                    <span id="dealInsight">-</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Действия</h3>
+        </div>
+        <div class="card-body">
+            <div class="actions-row">
+                <select id="managerSelect">
+                    <option value="">Выберите менеджера...</option>
+                </select>
+                <button onclick="assignManager()" class="btn btn-primary">Назначить</button>
+                <button onclick="closeDeal('won')" class="btn btn-success">Закрыть (Выигрыш)</button>
+                <button onclick="closeDeal('lost')" class="btn btn-danger">Закрыть (Проигрыш)</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat -->
+    <div class="card chat-card">
+        <div class="card-header">
+            <h3>Переписка</h3>
+        </div>
+        <div class="card-body">
+            <div class="chat-messages" id="chatMessages">
+                <div class="loading">Загрузка...</div>
+            </div>
+            <div class="chat-input">
+                <input type="text" id="messageInput" placeholder="Написать сообщение...">
+                <button onclick="sendMessage()" class="btn btn-primary">Отправить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const dealId = {{ deal_id }};
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadDeal();
+    loadMessages();
+    loadManagers();
+});
+
+async function loadDeal() {
+    const response = await fetch(`/api/admin/deals/${dealId}/data`);
+    const deal = await response.json();
+
+    document.getElementById('dealStatus').textContent = deal.status;
+    document.getElementById('dealStatus').className = `badge badge-${deal.status}`;
+    document.getElementById('dealProduct').textContent = deal.product;
+    document.getElementById('dealRegion').textContent = deal.region || '-';
+    document.getElementById('dealBuyPrice').textContent = formatMoney(deal.buy_price);
+    document.getElementById('dealSellPrice').textContent = formatMoney(deal.sell_price);
+    document.getElementById('dealMargin').textContent = formatMoney(deal.margin);
+    document.getElementById('dealProfit').textContent = deal.profit ? formatMoney(deal.profit) : '-';
+    document.getElementById('dealManager').textContent = deal.manager_name || 'Не назначен';
+    document.getElementById('dealInsight').textContent = deal.ai_insight || '-';
+}
+
+async function loadMessages() {
+    const response = await fetch(`/api/admin/deals/${dealId}/messages`);
+    const data = await response.json();
+
+    const container = document.getElementById('chatMessages');
+    if (data.messages.length === 0) {
+        container.innerHTML = '<div class="empty">Нет сообщений</div>';
+        return;
+    }
+
+    container.innerHTML = data.messages.map(msg => `
+        <div class="message message-${msg.role}">
+            <div class="message-header">
+                <span class="message-sender">${msg.sender_name}</span>
+                <span class="message-time">${formatTime(msg.created_at)}</span>
+            </div>
+            <div class="message-content">${escapeHtml(msg.content)}</div>
+        </div>
+    `).join('');
+
+    container.scrollTop = container.scrollHeight;
+}
+
+async function loadManagers() {
+    const response = await fetch('/api/admin/managers/list?active_only=true');
+    const data = await response.json();
+
+    const select = document.getElementById('managerSelect');
+    data.items.forEach(m => {
+        const option = document.createElement('option');
+        option.value = m.id;
+        option.textContent = m.display_name;
+        select.appendChild(option);
+    });
+}
+
+async function assignManager() {
+    const managerId = document.getElementById('managerSelect').value;
+    if (!managerId) return;
+
+    await fetch(`/api/admin/deals/${dealId}/assign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ manager_id: parseInt(managerId) })
+    });
+    loadDeal();
+}
+
+async function sendMessage() {
+    const input = document.getElementById('messageInput');
+    const content = input.value.trim();
+    if (!content) return;
+
+    await fetch(`/api/admin/deals/${dealId}/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content })
+    });
+
+    input.value = '';
+    loadMessages();
+}
+
+async function closeDeal(status) {
+    const resolution = prompt('Комментарий к закрытию (опционально):');
+
+    await fetch(`/api/admin/deals/${dealId}/close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, resolution })
+    });
+    loadDeal();
+}
+
+function formatMoney(value) { return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(value); }
+function formatTime(dateStr) { return new Date(dateStr).toLocaleString('ru-RU'); }
+function escapeHtml(text) { const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
+
+document.getElementById('messageInput').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') sendMessage();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,143 @@
+{% extends "admin/base.html" %}
+
+{% block page_title %}Дашборд{% endblock %}
+
+{% block content %}
+<!-- Metrics Cards -->
+<div class="metrics-grid">
+    <div class="metric-card">
+        <div class="metric-header">
+            <span class="metric-title">Чаты</span>
+        </div>
+        <div class="metric-value">
+            <span id="totalChats">-</span> / <span id="targetChats">-</span>
+        </div>
+        <div class="progress-bar">
+            <div class="progress-fill" id="chatsProgress" style="width: 0%"></div>
+        </div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-header">
+            <span class="metric-title">Сообщений сегодня</span>
+        </div>
+        <div class="metric-value">
+            <span id="messagesToday">-</span>
+        </div>
+        <div class="metric-sub">
+            Прошло фильтр: <span id="filterRate">-</span>%
+        </div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-header">
+            <span class="metric-title">Активных заявок</span>
+        </div>
+        <div class="metric-value">
+            <span class="text-success" id="buyOrders">-</span> /
+            <span class="text-warning" id="sellOrders">-</span>
+        </div>
+        <div class="metric-sub">Покупка / Продажа</div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-header">
+            <span class="metric-title">Сделок в работе</span>
+        </div>
+        <div class="metric-value" id="activeDeals">-</div>
+        <div class="metric-sub" id="dealsByStatus">-</div>
+    </div>
+
+    <div class="metric-card metric-card-accent">
+        <div class="metric-header">
+            <span class="metric-title">Профит</span>
+        </div>
+        <div class="metric-value text-success" id="profitToday">-</div>
+        <div class="metric-sub">
+            Неделя: <span id="profitWeek">-</span> | Месяц: <span id="profitMonth">-</span>
+        </div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-header">
+            <span class="metric-title">Конверсия</span>
+        </div>
+        <div class="metric-value" id="conversionRate">-</div>
+        <div class="metric-sub" id="funnelSummary">-</div>
+    </div>
+</div>
+
+<!-- Charts -->
+<div class="charts-grid">
+    <div class="chart-card">
+        <h3>Заявки за 14 дней</h3>
+        <canvas id="ordersChart"></canvas>
+    </div>
+
+    <div class="chart-card">
+        <h3>Воронка сделок</h3>
+        <canvas id="funnelChart"></canvas>
+    </div>
+</div>
+
+<script src="/static/js/admin.js"></script>
+<script>
+// Initialize dashboard
+document.addEventListener('DOMContentLoaded', () => {
+    loadMetrics();
+    setInterval(loadMetrics, 15000);
+});
+
+async function loadMetrics() {
+    try {
+        const response = await fetch('/api/admin/metrics');
+        const data = await response.json();
+        updateMetricsUI(data);
+    } catch (error) {
+        console.error('Failed to load metrics:', error);
+    }
+}
+
+function updateMetricsUI(data) {
+    // Chats
+    document.getElementById('totalChats').textContent = data.total_chats;
+    document.getElementById('targetChats').textContent = data.target_chats;
+    const chatsPercent = data.target_chats > 0 ? (data.total_chats / data.target_chats * 100) : 0;
+    document.getElementById('chatsProgress').style.width = Math.min(chatsPercent, 100) + '%';
+
+    // Messages
+    document.getElementById('messagesToday').textContent = data.messages_today;
+    document.getElementById('filterRate').textContent = data.filter_rate;
+
+    // Orders
+    document.getElementById('buyOrders').textContent = data.active_buy_orders;
+    document.getElementById('sellOrders').textContent = data.active_sell_orders;
+
+    // Deals
+    const activeDeals = data.deals_cold + data.deals_in_progress + data.deals_warm + data.deals_with_manager;
+    document.getElementById('activeDeals').textContent = activeDeals;
+    document.getElementById('dealsByStatus').textContent =
+        `Cold: ${data.deals_cold} | Progress: ${data.deals_in_progress} | Warm: ${data.deals_warm} | Manager: ${data.deals_with_manager}`;
+
+    // Profit
+    document.getElementById('profitToday').textContent = formatMoney(data.profit_today);
+    document.getElementById('profitWeek').textContent = formatMoney(data.profit_week);
+    document.getElementById('profitMonth').textContent = formatMoney(data.profit_month);
+
+    // Conversion
+    const closedDeals = data.deals_won + data.deals_lost;
+    const conversion = closedDeals > 0 ? (data.deals_won / closedDeals * 100).toFixed(1) : 0;
+    document.getElementById('conversionRate').textContent = conversion + '%';
+    document.getElementById('funnelSummary').textContent =
+        `Won: ${data.deals_won} | Lost: ${data.deals_lost}`;
+}
+
+function formatMoney(value) {
+    return new Intl.NumberFormat('ru-RU', {
+        style: 'currency',
+        currency: 'RUB',
+        maximumFractionDigits: 0
+    }).format(value);
+}
+</script>
+{% endblock %}

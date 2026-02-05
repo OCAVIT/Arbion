@@ -1,0 +1,32 @@
+[project]
+name = "arbion"
+version = "1.0.0"
+description = "Automated deal management system with Admin Dashboard and Manager Panel"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Arbion Team"}
+]
+keywords = ["fastapi", "telethon", "deals", "automation"]
+
+[project.urls]
+Homepage = "https://github.com/your-org/arbion"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
+ignore = ["E501"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

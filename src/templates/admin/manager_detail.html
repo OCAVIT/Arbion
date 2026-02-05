@@ -1,0 +1,110 @@
+{% extends "admin/base.html" %}
+
+{% block page_title %}Менеджер{% endblock %}
+
+{% block content %}
+<div class="manager-detail">
+    <!-- Manager Info -->
+    <div class="card">
+        <div class="card-header">
+            <h3 id="managerName">-</h3>
+            <span class="badge" id="managerStatus">-</span>
+        </div>
+        <div class="card-body">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="totalDeals">-</div>
+                    <div class="stat-label">Всего сделок</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="activeDeals">-</div>
+                    <div class="stat-label">Активных</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value text-success" id="wonDeals">-</div>
+                    <div class="stat-label">Выиграно</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value text-danger" id="lostDeals">-</div>
+                    <div class="stat-label">Проиграно</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="conversionRate">-</div>
+                    <div class="stat-label">Конверсия</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value text-success" id="totalProfit">-</div>
+                    <div class="stat-label">Общий профит</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Audit Log -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Аудит-лог</h3>
+        </div>
+        <div class="card-body">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Действие</th>
+                        <th>Объект</th>
+                        <th>IP</th>
+                        <th>Дата</th>
+                    </tr>
+                </thead>
+                <tbody id="auditTableBody">
+                    <tr><td colspan="4" class="loading">Загрузка...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+const managerId = {{ manager_id }};
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadManagerStats();
+    loadAuditLog();
+});
+
+async function loadManagerStats() {
+    const response = await fetch(`/api/admin/managers/${managerId}/stats`);
+    const data = await response.json();
+
+    document.getElementById('managerName').textContent = data.display_name;
+    document.getElementById('totalDeals').textContent = data.total_deals;
+    document.getElementById('activeDeals').textContent = data.active_deals;
+    document.getElementById('wonDeals').textContent = data.won_deals;
+    document.getElementById('lostDeals').textContent = data.lost_deals;
+    document.getElementById('conversionRate').textContent = data.conversion_rate + '%';
+    document.getElementById('totalProfit').textContent = formatMoney(data.total_profit);
+}
+
+async function loadAuditLog() {
+    const response = await fetch(`/api/admin/managers/${managerId}/audit`);
+    const data = await response.json();
+
+    const tbody = document.getElementById('auditTableBody');
+    if (data.items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty">Нет записей</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = data.items.map(log => `
+        <tr>
+            <td>${log.action}</td>
+            <td>${log.target_type ? `${log.target_type} #${log.target_id}` : '-'}</td>
+            <td>${log.ip_address || '-'}</td>
+            <td>${formatDate(log.created_at)}</td>
+        </tr>
+    `).join('');
+}
+
+function formatDate(dateStr) { return new Date(dateStr).toLocaleString('ru-RU'); }
+function formatMoney(value) { return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(value); }
+</script>
+{% endblock %}

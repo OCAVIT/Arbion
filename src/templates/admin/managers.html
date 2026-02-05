@@ -1,0 +1,323 @@
+{% extends "admin/base.html" %}
+
+{% block page_title %}Менеджеры{% endblock %}
+
+{% block header_actions %}
+<button onclick="showCreateModal()" class="btn btn-primary">+ Добавить менеджера</button>
+{% endblock %}
+
+{% block content %}
+<!-- Managers Table -->
+<div class="table-container">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Имя</th>
+                <th>Логин</th>
+                <th>Активных сделок</th>
+                <th>Выиграно</th>
+                <th>Проиграно</th>
+                <th>Конверсия</th>
+                <th>Средний чек</th>
+                <th>Последняя активность</th>
+                <th>Статус</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody id="managersTableBody">
+            <tr><td colspan="10" class="loading">Загрузка...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- Help tooltips -->
+<div class="help-bar">
+    <span class="help-item" title="Процент выигранных сделок от общего числа закрытых">📊 Конверсия</span>
+    <span class="help-item" title="Средняя сумма выигранных сделок менеджера">💰 Средний чек</span>
+    <span class="help-item" title="Персональная ссылка для входа менеджера. Скопируйте и отправьте менеджеру.">🔗 Ссылка для входа</span>
+</div>
+
+<!-- Manager Link Modal -->
+<div id="linkModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Ссылка для входа</h3>
+            <button onclick="closeLinkModal()" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p>Персональная ссылка для менеджера: <strong id="linkManagerName"></strong></p>
+            <div class="form-group">
+                <label>Ссылка для входа</label>
+                <div class="form-inline">
+                    <input type="text" id="managerLink" readonly>
+                    <button onclick="copyLink()" class="btn btn-primary">Копировать</button>
+                </div>
+                <small class="form-hint">Отправьте эту ссылку менеджеру вместе с паролем. По этой ссылке он сможет войти в систему.</small>
+            </div>
+            <div class="form-group" style="margin-top: 16px;">
+                <button onclick="regenerateToken()" class="btn btn-outline btn-sm">Сгенерировать новую ссылку</button>
+                <small class="form-hint" style="margin-top: 8px;">Используйте, если старая ссылка скомпрометирована. Старая ссылка перестанет работать.</small>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeLinkModal()" class="btn btn-outline">Закрыть</button>
+        </div>
+    </div>
+</div>
+
+<!-- Create Manager Modal -->
+<div id="createModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Создать менеджера</h3>
+            <button onclick="closeCreateModal()" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>Логин</label>
+                <input type="text" id="newUsername" required placeholder="Латинские буквы и цифры">
+                <small class="form-hint">Логин для входа в систему. Используйте только латинские буквы и цифры.</small>
+            </div>
+            <div class="form-group">
+                <label>Пароль</label>
+                <input type="password" id="newPassword" required minlength="6" placeholder="Минимум 6 символов">
+                <small class="form-hint">Пароль должен быть не менее 6 символов.</small>
+            </div>
+            <div class="form-group">
+                <label>Отображаемое имя</label>
+                <input type="text" id="newDisplayName" required placeholder="Имя для отображения в системе">
+                <small class="form-hint">Это имя будет видно в таблицах и отчётах.</small>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeCreateModal()" class="btn btn-outline">Отмена</button>
+            <button onclick="createManager()" class="btn btn-primary">Создать менеджера</button>
+        </div>
+    </div>
+</div>
+
+<!-- Reset Password Modal -->
+<div id="resetPasswordModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Сброс пароля</h3>
+            <button onclick="closeResetPasswordModal()" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p>Введите новый пароль для менеджера: <strong id="resetManagerName"></strong></p>
+            <div class="form-group">
+                <label>Новый пароль</label>
+                <input type="password" id="resetNewPassword" required minlength="6" placeholder="Минимум 6 символов">
+                <small class="form-hint">Пароль должен быть не менее 6 символов. После сброса сообщите новый пароль менеджеру.</small>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeResetPasswordModal()" class="btn btn-outline">Отмена</button>
+            <button onclick="confirmResetPassword()" class="btn btn-primary">Сбросить пароль</button>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', loadManagers);
+
+async function loadManagers() {
+    const response = await fetch('/api/admin/managers/list');
+    const data = await response.json();
+    renderManagers(data.items);
+}
+
+function renderManagers(managers) {
+    const tbody = document.getElementById('managersTableBody');
+
+    if (managers.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" class="empty">Нет менеджеров</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = managers.map(m => `
+        <tr>
+            <td><a href="/admin/managers/${m.id}">${escapeHtml(m.display_name)}</a></td>
+            <td>${escapeHtml(m.username)}</td>
+            <td>${m.active_deals_count}</td>
+            <td class="text-success">${m.won_deals_count}</td>
+            <td class="text-danger">${m.lost_deals_count}</td>
+            <td>${m.conversion_rate}%</td>
+            <td>${formatMoney(m.avg_deal_value)}</td>
+            <td>${m.last_active_at ? formatDate(m.last_active_at) : '-'}</td>
+            <td><span class="badge badge-${m.is_active ? 'active' : 'inactive'}">${m.is_active ? 'Активен' : 'Неактивен'}</span></td>
+            <td class="actions">
+                <button onclick="showManagerLink(${m.id}, '${escapeHtml(m.display_name)}', '${m.invite_token || ''}')" class="btn btn-sm btn-primary">Ссылка</button>
+                ${m.is_active ?
+                    `<button onclick="deactivateManager(${m.id})" class="btn btn-sm btn-outline">Деактивировать</button>` :
+                    `<button onclick="activateManager(${m.id})" class="btn btn-sm btn-primary">Активировать</button>`
+                }
+                <button onclick="resetPassword(${m.id}, '${escapeHtml(m.display_name)}')" class="btn btn-sm btn-outline">Сброс пароля</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function showCreateModal() {
+    document.getElementById('createModal').style.display = 'flex';
+}
+
+function closeCreateModal() {
+    document.getElementById('createModal').style.display = 'none';
+    document.getElementById('newUsername').value = '';
+    document.getElementById('newPassword').value = '';
+    document.getElementById('newDisplayName').value = '';
+}
+
+async function createManager() {
+    const username = document.getElementById('newUsername').value;
+    const password = document.getElementById('newPassword').value;
+    const displayName = document.getElementById('newDisplayName').value;
+
+    if (!username || !password || !displayName) {
+        alert('Заполните все поля');
+        return;
+    }
+
+    const response = await fetch('/api/admin/managers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password, display_name: displayName })
+    });
+
+    if (response.ok) {
+        closeCreateModal();
+        loadManagers();
+    } else {
+        const data = await response.json();
+        alert(data.detail || 'Ошибка создания');
+    }
+}
+
+async function deactivateManager(id) {
+    if (!confirm('Деактивировать этого менеджера?')) return;
+    await fetch(`/api/admin/managers/${id}`, { method: 'DELETE' });
+    loadManagers();
+}
+
+async function activateManager(id) {
+    await fetch(`/api/admin/managers/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: true })
+    });
+    loadManagers();
+}
+
+let currentResetManagerId = null;
+let currentLinkManagerId = null;
+
+function showManagerLink(id, displayName, inviteToken) {
+    currentLinkManagerId = id;
+    document.getElementById('linkManagerName').textContent = displayName || 'менеджера';
+
+    const baseUrl = window.location.origin;
+    const link = `${baseUrl}/api/auth/m/${inviteToken}`;
+    document.getElementById('managerLink').value = link;
+
+    document.getElementById('linkModal').style.display = 'flex';
+}
+
+function closeLinkModal() {
+    document.getElementById('linkModal').style.display = 'none';
+    currentLinkManagerId = null;
+}
+
+function copyLink() {
+    const linkInput = document.getElementById('managerLink');
+    linkInput.select();
+    linkInput.setSelectionRange(0, 99999);
+    navigator.clipboard.writeText(linkInput.value).then(() => {
+        showNotification('Ссылка скопирована в буфер обмена', 'success');
+    }).catch(() => {
+        // Fallback for older browsers
+        document.execCommand('copy');
+        showNotification('Ссылка скопирована', 'success');
+    });
+}
+
+async function regenerateToken() {
+    if (!confirm('Вы уверены? Старая ссылка перестанет работать.')) return;
+
+    try {
+        const response = await fetch(`/api/admin/managers/${currentLinkManagerId}/regenerate-token`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            const baseUrl = window.location.origin;
+            document.getElementById('managerLink').value = `${baseUrl}/api/auth/m/${data.invite_token}`;
+            showNotification('Новая ссылка сгенерирована', 'success');
+            loadManagers(); // Refresh the table
+        } else {
+            const data = await response.json();
+            showNotification(data.detail || 'Не удалось сгенерировать ссылку', 'error');
+        }
+    } catch (error) {
+        showNotification('Ошибка сети', 'error');
+    }
+}
+
+function resetPassword(id, displayName) {
+    currentResetManagerId = id;
+    document.getElementById('resetManagerName').textContent = displayName || 'менеджера';
+    document.getElementById('resetNewPassword').value = '';
+    document.getElementById('resetPasswordModal').style.display = 'flex';
+}
+
+function closeResetPasswordModal() {
+    document.getElementById('resetPasswordModal').style.display = 'none';
+    currentResetManagerId = null;
+}
+
+async function confirmResetPassword() {
+    const newPassword = document.getElementById('resetNewPassword').value;
+    if (!newPassword || newPassword.length < 6) {
+        showNotification('Пароль должен быть не менее 6 символов', 'error');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/admin/managers/${currentResetManagerId}/reset-password?new_password=${encodeURIComponent(newPassword)}`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            showNotification('Пароль успешно сброшен. Сообщите новый пароль менеджеру.', 'success');
+            closeResetPasswordModal();
+        } else {
+            const data = await response.json();
+            showNotification(data.detail || 'Не удалось сбросить пароль', 'error');
+        }
+    } catch (error) {
+        showNotification('Ошибка сети. Проверьте подключение к интернету.', 'error');
+    }
+}
+
+function formatDate(dateStr) { return new Date(dateStr).toLocaleString('ru-RU'); }
+function formatMoney(value) { return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(value); }
+function escapeHtml(text) { const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
+
+// Notification system
+function showNotification(message, type = 'info') {
+    const existing = document.querySelector('.notification');
+    if (existing) existing.remove();
+
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.innerHTML = `
+        <span>${message}</span>
+        <button onclick="this.parentElement.remove()" class="notification-close">&times;</button>
+    `;
+    document.body.appendChild(notification);
+
+    setTimeout(() => notification.remove(), 5000);
+}
+</script>
+{% endblock %}

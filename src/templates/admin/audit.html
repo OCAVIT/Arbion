@@ -1,0 +1,122 @@
+{% extends "admin/base.html" %}
+
+{% block page_title %}Аудит{% endblock %}
+
+{% block content %}
+<!-- Filters -->
+<div class="filters-bar">
+    <select id="actionFilter" onchange="loadAudit()">
+        <option value="">Все действия</option>
+    </select>
+    <select id="userFilter" onchange="loadAudit()">
+        <option value="">Все пользователи</option>
+    </select>
+</div>
+
+<!-- Audit Table -->
+<div class="table-container">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Дата</th>
+                <th>Пользователь</th>
+                <th>Действие</th>
+                <th>Объект</th>
+                <th>IP</th>
+                <th>Детали</th>
+            </tr>
+        </thead>
+        <tbody id="auditTableBody">
+            <tr><td colspan="6" class="loading">Загрузка...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- Pagination -->
+<div class="pagination" id="pagination"></div>
+
+<script>
+let currentPage = 1;
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadActions();
+    loadUsers();
+    loadAudit();
+});
+
+async function loadActions() {
+    const response = await fetch('/api/admin/audit/actions');
+    const data = await response.json();
+
+    const select = document.getElementById('actionFilter');
+    data.actions.forEach(action => {
+        const option = document.createElement('option');
+        option.value = action;
+        option.textContent = action;
+        select.appendChild(option);
+    });
+}
+
+async function loadUsers() {
+    const response = await fetch('/api/admin/managers/list');
+    const data = await response.json();
+
+    const select = document.getElementById('userFilter');
+    data.items.forEach(user => {
+        const option = document.createElement('option');
+        option.value = user.id;
+        option.textContent = user.display_name;
+        select.appendChild(option);
+    });
+}
+
+async function loadAudit() {
+    const action = document.getElementById('actionFilter').value;
+    const userId = document.getElementById('userFilter').value;
+
+    const params = new URLSearchParams({ page: currentPage, per_page: 50 });
+    if (action) params.append('action', action);
+    if (userId) params.append('user_id', userId);
+
+    const response = await fetch(`/api/admin/audit/list?${params}`);
+    const data = await response.json();
+
+    renderAudit(data.items);
+    renderPagination(data.total, data.page, data.pages);
+}
+
+function renderAudit(logs) {
+    const tbody = document.getElementById('auditTableBody');
+
+    if (logs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty">Нет записей</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = logs.map(log => `
+        <tr>
+            <td>${formatDate(log.created_at)}</td>
+            <td>${escapeHtml(log.display_name)}</td>
+            <td><span class="badge">${log.action}</span></td>
+            <td>${log.target_type ? `${log.target_type} #${log.target_id}` : '-'}</td>
+            <td>${log.ip_address || '-'}</td>
+            <td>${log.metadata ? JSON.stringify(log.metadata).substring(0, 50) : '-'}</td>
+        </tr>
+    `).join('');
+}
+
+function renderPagination(total, page, pages) {
+    const container = document.getElementById('pagination');
+    if (pages <= 1) { container.innerHTML = ''; return; }
+    let html = '';
+    for (let i = 1; i <= Math.min(pages, 10); i++) {
+        html += `<button class="btn btn-sm ${i === page ? 'btn-primary' : 'btn-outline'}" onclick="goToPage(${i})">${i}</button>`;
+    }
+    container.innerHTML = html;
+}
+
+function goToPage(page) { currentPage = page; loadAudit(); }
+function formatDate(dateStr) { return new Date(dateStr).toLocaleString('ru-RU'); }
+function escapeHtml(text) { const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
+</script>
+{% endblock %}
