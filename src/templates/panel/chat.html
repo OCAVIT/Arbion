@@ -1,34 +1,66 @@
 {% extends "panel/base.html" %}
 
-{% block page_title %}Чат с продавцом{% endblock %}
+{% block page_title %}Сделка{% endblock %}
 
 {% block content %}
-<div class="chat-container">
+<div class="chat-page">
     <!-- Deal Info -->
-    <div class="chat-info">
-        <div class="info-item">
-            <label>Товар:</label>
-            <span id="dealProduct">-</span>
+    <div class="deal-info-bar">
+        <div class="deal-info-item">
+            <span class="deal-info-label">Товар:</span>
+            <span class="deal-info-value" id="dealProduct">-</span>
         </div>
-        <div class="info-item">
-            <label>Цена:</label>
-            <span id="dealPrice">-</span>
+        <div class="deal-info-item">
+            <span class="deal-info-label">Цена:</span>
+            <span class="deal-info-value text-success" id="dealPrice">-</span>
         </div>
-        <div class="info-item">
-            <label>Статус:</label>
+        <div class="deal-info-item">
+            <span class="deal-info-label">Статус:</span>
             <span id="dealStatus" class="badge">-</span>
         </div>
     </div>
 
-    <!-- Chat Messages -->
-    <div class="chat-messages" id="chatMessages">
-        <div class="loading">Загрузка...</div>
+    <!-- Chat Tabs -->
+    <div class="chat-tabs">
+        <button class="chat-tab active" data-chat="seller" onclick="switchChat('seller')">
+            Продавец
+            <span class="chat-tab-badge" id="sellerBadge">0</span>
+        </button>
+        <button class="chat-tab" data-chat="buyer" onclick="switchChat('buyer')">
+            Покупатель
+            <span class="chat-tab-badge" id="buyerBadge">0</span>
+        </button>
     </div>
 
-    <!-- Chat Input -->
-    <div class="chat-input-area" id="chatInputArea">
-        <input type="text" id="messageInput" placeholder="Напишите сообщение...">
-        <button onclick="sendMessage()" class="btn btn-primary">Отправить</button>
+    <!-- Chats Container -->
+    <div class="chats-wrapper">
+        <!-- Seller Chat -->
+        <div class="chat-panel active" id="sellerChat">
+            <div class="chat-messages" id="sellerMessages">
+                <div class="loading">Загрузка...</div>
+            </div>
+            <div class="chat-input-area" id="sellerInputArea">
+                <input type="text" id="sellerMessageInput" placeholder="Написать продавцу...">
+                <button onclick="sendMessage('seller')" class="btn btn-primary">
+                    <span class="btn-text">Отправить</span>
+                    <span class="btn-icon">&#10148;</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Buyer Chat -->
+        <div class="chat-panel" id="buyerChat">
+            <div class="chat-messages" id="buyerMessages">
+                <div class="loading">Загрузка...</div>
+            </div>
+            <div class="chat-input-area" id="buyerInputArea">
+                <input type="text" id="buyerMessageInput" placeholder="Написать покупателю...">
+                <button onclick="sendMessage('buyer')" class="btn btn-primary">
+                    <span class="btn-text">Отправить</span>
+                    <span class="btn-icon">&#10148;</span>
+                </button>
+            </div>
+        </div>
     </div>
 
     <!-- Close Actions -->
@@ -38,9 +70,313 @@
     </div>
 </div>
 
+<style>
+/* Chat Page Styles */
+.chat-page {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - var(--header-height) - 32px);
+    max-height: calc(100vh - var(--header-height) - 32px);
+}
+
+/* Deal Info Bar */
+.deal-info-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 12px 16px;
+    background: var(--bg-card);
+    border-radius: var(--border-radius);
+    margin-bottom: 12px;
+    flex-shrink: 0;
+}
+
+.deal-info-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.deal-info-label {
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.deal-info-value {
+    font-weight: 600;
+}
+
+/* Chat Tabs */
+.chat-tabs {
+    display: flex;
+    margin-bottom: 12px;
+    background: var(--bg-card);
+    border-radius: var(--border-radius);
+    padding: 4px;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.chat-tab {
+    flex: 1;
+    padding: 12px 16px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-size: 14px;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.chat-tab:hover {
+    background: var(--bg-hover);
+}
+
+.chat-tab.active {
+    background: var(--success);
+    color: white;
+}
+
+.chat-tab-badge {
+    background: var(--bg-hover);
+    color: var(--text-secondary);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    min-width: 24px;
+    text-align: center;
+}
+
+.chat-tab.active .chat-tab-badge {
+    background: rgba(255,255,255,0.2);
+    color: white;
+}
+
+/* Chats Wrapper */
+.chats-wrapper {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg-card);
+    border-radius: var(--border-radius);
+    min-height: 0;
+}
+
+/* Chat Panel */
+.chat-panel {
+    display: none;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+}
+
+.chat-panel.active {
+    display: flex;
+}
+
+/* Chat Messages */
+.chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Messages */
+.message {
+    max-width: 85%;
+    padding: 10px 14px;
+    border-radius: 16px;
+    word-break: break-word;
+}
+
+.message-ai {
+    background: var(--bg-secondary);
+    margin-right: auto;
+    border-bottom-left-radius: 4px;
+}
+
+.message-seller {
+    background: linear-gradient(135deg, #1e3a5f 0%, #1a365d 100%);
+    margin-right: auto;
+    border-bottom-left-radius: 4px;
+}
+
+.message-buyer {
+    background: linear-gradient(135deg, #3d1e5f 0%, #4a1d6d 100%);
+    margin-right: auto;
+    border-bottom-left-radius: 4px;
+}
+
+.message-manager {
+    background: linear-gradient(135deg, var(--success) 0%, #059669 100%);
+    margin-left: auto;
+    border-bottom-right-radius: 4px;
+}
+
+.message-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 6px;
+    font-size: 11px;
+    opacity: 0.8;
+}
+
+.message-sender {
+    font-weight: 600;
+}
+
+.message-content {
+    white-space: pre-wrap;
+    line-height: 1.4;
+}
+
+/* Chat Input */
+.chat-input-area {
+    display: flex;
+    gap: 8px;
+    padding: 12px 16px;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.chat-input-area input {
+    flex: 1;
+    min-width: 0;
+    font-size: 16px; /* Prevents zoom on iOS */
+}
+
+.chat-input-area .btn {
+    flex-shrink: 0;
+    padding: 10px 16px;
+}
+
+.chat-input-area .btn-icon {
+    display: none;
+}
+
+/* Chat Actions */
+.chat-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 12px;
+    flex-shrink: 0;
+}
+
+.chat-actions .btn {
+    flex: 1;
+}
+
+/* Empty/Loading states */
+.empty, .loading {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-muted);
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+    .chat-page {
+        height: calc(100vh - var(--header-height) - 16px);
+    }
+
+    .deal-info-bar {
+        padding: 10px 12px;
+        gap: 12px;
+    }
+
+    .deal-info-item {
+        flex: 1 1 auto;
+    }
+
+    .deal-info-label {
+        font-size: 12px;
+    }
+
+    .chat-tabs {
+        margin-bottom: 8px;
+    }
+
+    .chat-tab {
+        padding: 10px 12px;
+        font-size: 13px;
+    }
+
+    .chat-messages {
+        padding: 12px;
+        gap: 10px;
+    }
+
+    .message {
+        max-width: 90%;
+        padding: 8px 12px;
+    }
+
+    .message-header {
+        font-size: 10px;
+    }
+
+    .message-content {
+        font-size: 14px;
+    }
+
+    .chat-input-area {
+        padding: 10px 12px;
+    }
+
+    .chat-input-area .btn {
+        padding: 10px 12px;
+    }
+
+    .chat-input-area .btn-text {
+        display: none;
+    }
+
+    .chat-input-area .btn-icon {
+        display: inline;
+        font-size: 18px;
+    }
+
+    .chat-actions {
+        flex-direction: column;
+        gap: 8px;
+    }
+}
+
+@media (max-width: 480px) {
+    .deal-info-bar {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .deal-info-item {
+        justify-content: space-between;
+        width: 100%;
+    }
+
+    .chat-tab-badge {
+        padding: 2px 6px;
+        font-size: 11px;
+    }
+}
+</style>
+
 <script>
 const negotiationId = {{ negotiation_id }};
 let refreshInterval;
+let activeChat = 'seller';
+let dealClosed = false;
 
 document.addEventListener('DOMContentLoaded', () => {
     loadMessages();
@@ -59,19 +395,35 @@ async function loadMessages() {
 
     // Check if closed
     if (data.deal_status === 'won' || data.deal_status === 'lost') {
-        document.getElementById('chatInputArea').style.display = 'none';
+        dealClosed = true;
+        document.getElementById('sellerInputArea').style.display = 'none';
+        document.getElementById('buyerInputArea').style.display = 'none';
         document.getElementById('chatActions').style.display = 'none';
         clearInterval(refreshInterval);
     }
 
-    // Render messages
-    const container = document.getElementById('chatMessages');
-    if (data.messages.length === 0) {
+    // Render seller messages
+    const sellerMessages = data.seller_messages || [];
+    renderMessages('sellerMessages', sellerMessages);
+    document.getElementById('sellerBadge').textContent = sellerMessages.length;
+
+    // Render buyer messages
+    const buyerMessages = data.buyer_messages || [];
+    renderMessages('buyerMessages', buyerMessages);
+    document.getElementById('buyerBadge').textContent = buyerMessages.length;
+}
+
+function renderMessages(containerId, messages) {
+    const container = document.getElementById(containerId);
+
+    if (messages.length === 0) {
         container.innerHTML = '<div class="empty">Нет сообщений</div>';
         return;
     }
 
-    container.innerHTML = data.messages.map(msg => `
+    const wasScrolledToBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 50;
+
+    container.innerHTML = messages.map(msg => `
         <div class="message message-${msg.role}">
             <div class="message-header">
                 <span class="message-sender">${escapeHtml(msg.sender_name)}</span>
@@ -81,26 +433,38 @@ async function loadMessages() {
         </div>
     `).join('');
 
-    container.scrollTop = container.scrollHeight;
+    if (wasScrolledToBottom) {
+        container.scrollTop = container.scrollHeight;
+    }
 }
 
-async function sendMessage() {
-    const input = document.getElementById('messageInput');
+async function sendMessage(target) {
+    if (dealClosed) return;
+
+    const inputId = target === 'seller' ? 'sellerMessageInput' : 'buyerMessageInput';
+    const input = document.getElementById(inputId);
     const content = input.value.trim();
     if (!content) return;
 
-    const response = await fetch(`/panel/chat/${negotiationId}/send`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content })
-    });
+    const btn = input.nextElementSibling;
+    btn.disabled = true;
 
-    if (response.ok) {
-        input.value = '';
-        loadMessages();
-    } else {
-        const data = await response.json();
-        alert(data.detail || 'Ошибка');
+    try {
+        const response = await fetch(`/panel/chat/${negotiationId}/send`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content, target })
+        });
+
+        if (response.ok) {
+            input.value = '';
+            loadMessages();
+        } else {
+            const data = await response.json();
+            alert(data.detail || 'Ошибка');
+        }
+    } finally {
+        btn.disabled = false;
     }
 }
 
@@ -122,6 +486,19 @@ async function closeDeal(status) {
     }
 }
 
+function switchChat(chat) {
+    activeChat = chat;
+
+    // Update tabs
+    document.querySelectorAll('.chat-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.chat === chat);
+    });
+
+    // Update chat panels
+    document.getElementById('sellerChat').classList.toggle('active', chat === 'seller');
+    document.getElementById('buyerChat').classList.toggle('active', chat === 'buyer');
+}
+
 function getStatusLabel(status) {
     const labels = {
         'cold': 'Cold',
@@ -135,11 +512,23 @@ function getStatusLabel(status) {
 }
 
 function formatMoney(value) {
-    return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(value);
+    return new Intl.NumberFormat('ru-RU', {
+        style: 'currency',
+        currency: 'RUB',
+        maximumFractionDigits: 0
+    }).format(value);
 }
 
 function formatTime(dateStr) {
-    return new Date(dateStr).toLocaleString('ru-RU');
+    const date = new Date(dateStr);
+    const now = new Date();
+    const isToday = date.toDateString() === now.toDateString();
+
+    if (isToday) {
+        return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    }
+    return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) +
+           ' ' + date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 }
 
 function escapeHtml(text) {
@@ -148,8 +537,18 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-document.getElementById('messageInput').addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') sendMessage();
+// Handle Enter key for sending messages
+document.getElementById('sellerMessageInput').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') sendMessage('seller');
+});
+
+document.getElementById('buyerMessageInput').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') sendMessage('buyer');
+});
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+    if (refreshInterval) clearInterval(refreshInterval);
 });
 </script>
 {% endblock %}

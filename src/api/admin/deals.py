@@ -18,6 +18,7 @@ from src.models import (
     DetectedDeal,
     LedgerEntry,
     MessageRole,
+    MessageTarget,
     Negotiation,
     NegotiationMessage,
     OutboxMessage,
@@ -195,10 +196,11 @@ async def get_deal(
 @router.get("/{deal_id}/messages")
 async def get_deal_messages(
     deal_id: int,
+    target: Optional[str] = Query(None, pattern="^(seller|buyer)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_owner),
 ):
-    """Get all messages for a deal (unmasked for owner)."""
+    """Get all messages for a deal (unmasked for owner). Optionally filter by target (seller/buyer)."""
     # Get deal with negotiation
     deal = await db.execute(
         select(DetectedDeal)
@@ -214,27 +216,44 @@ async def get_deal_messages(
         )
 
     if not deal.negotiation:
-        return {"messages": []}
+        return {"messages": [], "seller_messages": [], "buyer_messages": []}
 
-    # Get messages
-    result = await db.execute(
+    # Build query
+    query = (
         select(NegotiationMessage)
         .options(selectinload(NegotiationMessage.sent_by))
         .where(NegotiationMessage.negotiation_id == deal.negotiation.id)
-        .order_by(NegotiationMessage.created_at)
     )
+
+    if target:
+        target_enum = MessageTarget.SELLER if target == "seller" else MessageTarget.BUYER
+        query = query.where(NegotiationMessage.target == target_enum)
+
+    query = query.order_by(NegotiationMessage.created_at)
+
+    result = await db.execute(query)
     messages = result.scalars().all()
 
-    return {
-        "messages": [
-            MessageResponse.from_message(
-                msg,
-                role="owner",
-                sender_name=msg.sent_by.display_name if msg.sent_by else None,
-            )
-            for msg in messages
-        ]
-    }
+    all_messages = [
+        MessageResponse.from_message(
+            msg,
+            role="owner",
+            sender_name=msg.sent_by.display_name if msg.sent_by else None,
+        )
+        for msg in messages
+    ]
+
+    # If no target filter, also return separated lists
+    if not target:
+        seller_messages = [m for m in all_messages if m.target == "seller"]
+        buyer_messages = [m for m in all_messages if m.target == "buyer"]
+        return {
+            "messages": all_messages,
+            "seller_messages": seller_messages,
+            "buyer_messages": buyer_messages,
+        }
+
+    return {"messages": all_messages}
 
 
 @router.post("/{deal_id}/assign")
@@ -292,10 +311,13 @@ async def send_message(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_owner),
 ):
-    """Send a message as owner."""
+    """Send a message as owner to seller or buyer."""
     deal = await db.execute(
         select(DetectedDeal)
-        .options(selectinload(DetectedDeal.negotiation))
+        .options(
+            selectinload(DetectedDeal.negotiation),
+            selectinload(DetectedDeal.buy_order),
+        )
         .where(DetectedDeal.id == deal_id)
     )
     deal = deal.scalar_one_or_none()
@@ -306,18 +328,33 @@ async def send_message(
             detail="Deal or negotiation not found",
         )
 
+    # Determine target
+    target_enum = MessageTarget.SELLER if data.target == "seller" else MessageTarget.BUYER
+
     # Add message to history
     message = NegotiationMessage(
         negotiation_id=deal.negotiation.id,
         role=MessageRole.MANAGER,  # Owner sends as manager role
+        target=target_enum,
         content=data.content,
         sent_by_user_id=current_user.id,
     )
     db.add(message)
 
-    # Queue for sending
+    # Queue for sending - determine recipient based on target
+    if data.target == "seller":
+        recipient_id = deal.negotiation.seller_sender_id
+    else:
+        # Buyer - use buyer_sender_id from deal
+        recipient_id = deal.buyer_sender_id
+        if not recipient_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Buyer contact not available",
+            )
+
     outbox = OutboxMessage(
-        recipient_id=deal.negotiation.seller_sender_id,
+        recipient_id=recipient_id,
         message_text=data.content,
         negotiation_id=deal.negotiation.id,
         sent_by_user_id=current_user.id,
@@ -330,11 +367,12 @@ async def send_message(
         action=AuditAction.SEND_MESSAGE,
         target_type="negotiation",
         target_id=deal.negotiation.id,
+        action_metadata={"target": data.target},
         ip_address=get_client_ip(request),
     )
 
     await db.commit()
-    return {"success": True, "message_id": message.id}
+    return {"success": True, "message_id": message.id, "target": data.target}
 
 
 @router.post("/{deal_id}/close")

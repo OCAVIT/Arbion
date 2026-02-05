@@ -1,8 +1,9 @@
 """Manager panel chat API endpoints."""
 
 from datetime import datetime, timezone
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
@@ -17,6 +18,7 @@ from src.models import (
     DetectedDeal,
     LedgerEntry,
     MessageRole,
+    MessageTarget,
     Negotiation,
     NegotiationMessage,
     NegotiationStage,
@@ -86,6 +88,7 @@ async def chat_page(
 @router.get("/{negotiation_id}/messages")
 async def get_messages(
     negotiation_id: int,
+    target: Optional[str] = Query(None, pattern="^(seller|buyer)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_manager),
 ):
@@ -117,25 +120,46 @@ async def get_messages(
             detail="У вас нет доступа к этой сделке",
         )
 
-    # Get messages
-    msg_result = await db.execute(
+    # Build query
+    query = (
         select(NegotiationMessage)
         .options(selectinload(NegotiationMessage.sent_by))
         .where(NegotiationMessage.negotiation_id == negotiation_id)
-        .order_by(NegotiationMessage.created_at)
     )
+
+    if target:
+        target_enum = MessageTarget.SELLER if target == "seller" else MessageTarget.BUYER
+        query = query.where(NegotiationMessage.target == target_enum)
+
+    query = query.order_by(NegotiationMessage.created_at)
+
+    msg_result = await db.execute(query)
     messages = msg_result.scalars().all()
 
-    # Build response with MASKED data for manager
+    all_messages = [
+        MessageResponse.from_message(
+            msg,
+            role="manager",  # This triggers masking
+            sender_name=msg.sent_by.display_name if msg.sent_by else None,
+        )
+        for msg in messages
+    ]
+
+    # If no target filter, return separated lists
+    if not target:
+        seller_messages = [m for m in all_messages if m.target == "seller"]
+        buyer_messages = [m for m in all_messages if m.target == "buyer"]
+        return {
+            "messages": all_messages,
+            "seller_messages": seller_messages,
+            "buyer_messages": buyer_messages,
+            "deal_status": negotiation.deal.status.value,
+            "product": negotiation.deal.product,
+            "sell_price": str(negotiation.deal.sell_price),
+        }
+
     return {
-        "messages": [
-            MessageResponse.from_message(
-                msg,
-                role="manager",  # This triggers masking
-                sender_name=msg.sent_by.display_name if msg.sent_by else None,
-            )
-            for msg in messages
-        ],
+        "messages": all_messages,
         "deal_status": negotiation.deal.status.value,
         "product": negotiation.deal.product,
         "sell_price": str(negotiation.deal.sell_price),
@@ -151,7 +175,7 @@ async def send_message(
     current_user: User = Depends(require_manager),
 ):
     """
-    Send a message in the negotiation.
+    Send a message in the negotiation to seller or buyer.
 
     Message is queued for sending via Telegram.
     """
@@ -183,18 +207,34 @@ async def send_message(
             detail="Сделка уже закрыта",
         )
 
+    # Determine target
+    target_enum = MessageTarget.SELLER if data.target == "seller" else MessageTarget.BUYER
+
     # Add message to history
     message = NegotiationMessage(
         negotiation_id=negotiation_id,
         role=MessageRole.MANAGER,
+        target=target_enum,
         content=data.content,
         sent_by_user_id=current_user.id,
     )
     db.add(message)
 
+    # Determine recipient based on target
+    if data.target == "seller":
+        recipient_id = negotiation.seller_sender_id
+    else:
+        # Buyer - use buyer_sender_id from deal
+        recipient_id = negotiation.deal.buyer_sender_id
+        if not recipient_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Контакт покупателя недоступен",
+            )
+
     # Queue for sending via Telegram
     outbox = OutboxMessage(
-        recipient_id=negotiation.seller_sender_id,
+        recipient_id=recipient_id,
         message_text=data.content,
         negotiation_id=negotiation_id,
         sent_by_user_id=current_user.id,

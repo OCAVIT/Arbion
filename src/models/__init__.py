@@ -12,6 +12,7 @@ from src.models.deal import DealStatus, DetectedDeal
 from src.models.ledger import LedgerEntry
 from src.models.negotiation import (
     MessageRole,
+    MessageTarget,
     Negotiation,
     NegotiationMessage,
     NegotiationStage,
@@ -45,6 +46,7 @@ __all__ = [
     "NegotiationMessage",
     "NegotiationStage",
     "MessageRole",
+    "MessageTarget",
     # Ledger
     "LedgerEntry",
     # Settings

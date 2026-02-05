@@ -13,7 +13,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field, computed_field
 
 from src.models.deal import DealStatus
-from src.models.negotiation import MessageRole
+from src.models.negotiation import MessageRole, MessageTarget
 from src.utils.masking import generate_contact_ref, mask_sensitive
 
 
@@ -172,7 +172,8 @@ class MessageResponse(BaseModel):
     """Chat message for display."""
 
     id: int
-    role: str  # "ai", "seller", "manager"
+    role: str  # "ai", "seller", "buyer", "manager"
+    target: str  # "seller" or "buyer" - which chat this message belongs to
     content: str
     sender_name: Optional[str]
     created_at: datetime
@@ -203,14 +204,20 @@ class MessageResponse(BaseModel):
             display_name = "Ассистент"
         elif message.role == MessageRole.SELLER:
             display_name = "Продавец"
+        elif message.role == MessageRole.BUYER:
+            display_name = "Покупатель"
         elif message.role == MessageRole.MANAGER:
             display_name = sender_name or "Менеджер"
         else:
             display_name = "Система"
 
+        # Get target value
+        target_value = message.target.value if hasattr(message, 'target') and message.target else "seller"
+
         return cls(
             id=message.id,
             role=message.role,
+            target=target_value,
             content=content,
             sender_name=display_name,
             created_at=message.created_at,
@@ -234,6 +241,11 @@ class SendMessageRequest(BaseModel):
     """Request to send a message in negotiation."""
 
     content: str = Field(..., min_length=1, max_length=4000)
+    target: str = Field(
+        default="seller",
+        pattern="^(seller|buyer)$",
+        description="Target chat: seller or buyer"
+    )
 
 
 class DealListResponse(BaseModel):

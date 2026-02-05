@@ -19,6 +19,7 @@ from src.models import (
     DealStatus,
     DetectedDeal,
     MessageRole,
+    MessageTarget,
     Negotiation,
     NegotiationMessage,
     NegotiationStage,
@@ -210,11 +211,12 @@ async def initiate_negotiation(deal: DetectedDeal, db: AsyncSession) -> Optional
         # Generate initial message for SELLER
         seller_message = generate_response('initial_seller', deal.product)
 
-        # Save message to history
+        # Save message to history (for SELLER chat)
         msg = NegotiationMessage(
             negotiation_id=negotiation.id,
             role=MessageRole.AI,
-            content=f"[К продавцу] {seller_message}",
+            target=MessageTarget.SELLER,
+            content=seller_message,
         )
         db.add(msg)
 
@@ -234,11 +236,12 @@ async def initiate_negotiation(deal: DetectedDeal, db: AsyncSession) -> Optional
         if buyer_sender_id or buyer_chat_id:
             buyer_message = generate_response('initial_buyer', deal.product)
 
-            # Save buyer message to history
+            # Save buyer message to history (for BUYER chat)
             buyer_msg = NegotiationMessage(
                 negotiation_id=negotiation.id,
                 role=MessageRole.AI,
-                content=f"[К покупателю] {buyer_message}",
+                target=MessageTarget.BUYER,
+                content=buyer_message,
             )
             db.add(buyer_msg)
 
@@ -282,10 +285,11 @@ async def process_seller_response(
         True if response processed, False otherwise
     """
     try:
-        # Save seller's message
+        # Save seller's message (in SELLER chat)
         seller_msg = NegotiationMessage(
             negotiation_id=negotiation.id,
             role=MessageRole.SELLER,
+            target=MessageTarget.SELLER,
             content=response_text,
         )
         db.add(seller_msg)
@@ -327,6 +331,7 @@ async def process_seller_response(
         ai_msg = NegotiationMessage(
             negotiation_id=negotiation.id,
             role=MessageRole.AI,
+            target=MessageTarget.SELLER,
             content=follow_up,
         )
         db.add(ai_msg)
@@ -349,6 +354,60 @@ async def process_seller_response(
 
     except Exception as e:
         logger.error(f"Failed to process response for negotiation {negotiation.id}: {e}")
+        await db.rollback()
+        return False
+
+
+async def process_buyer_response(
+    negotiation: Negotiation,
+    response_text: str,
+    db: AsyncSession,
+) -> bool:
+    """
+    Process buyer's response and save to chat history.
+
+    Args:
+        negotiation: The Negotiation record
+        response_text: Buyer's message text
+        db: Database session
+
+    Returns:
+        True if response processed, False otherwise
+    """
+    try:
+        # Save buyer's message (in BUYER chat)
+        buyer_msg = NegotiationMessage(
+            negotiation_id=negotiation.id,
+            role=MessageRole.BUYER,
+            target=MessageTarget.BUYER,
+            content=response_text,
+        )
+        db.add(buyer_msg)
+
+        # Analyze response
+        sentiment = analyze_response(response_text)
+        logger.info(f"Negotiation {negotiation.id}: buyer response sentiment = {sentiment}")
+
+        deal = negotiation.deal
+
+        if sentiment == 'negative':
+            # Buyer not interested - note it but don't close deal
+            # (deal can still proceed with seller)
+            deal.ai_insight = (deal.ai_insight or "") + f"\nПокупатель: {response_text[:50]}"
+            await db.commit()
+            logger.info(f"Deal {deal.id}: buyer declined, noted")
+            return True
+
+        # For positive responses from buyer - just save and note
+        if sentiment in ['positive', 'price']:
+            deal.ai_insight = (deal.ai_insight or "") + f"\nПокупатель заинтересован: {response_text[:50]}"
+
+        await db.commit()
+        logger.info(f"Saved buyer response for negotiation {negotiation.id}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to process buyer response for negotiation {negotiation.id}: {e}")
         await db.rollback()
         return False
 

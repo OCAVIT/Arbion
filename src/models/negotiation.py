@@ -33,7 +33,14 @@ class MessageRole(str, Enum):
     """Who sent the message."""
     AI = "ai"           # AI negotiator
     SELLER = "seller"   # The seller
+    BUYER = "buyer"     # The buyer
     MANAGER = "manager"  # Human manager
+
+
+class MessageTarget(str, Enum):
+    """Who the message is directed to (which chat)."""
+    SELLER = "seller"   # Chat with the seller
+    BUYER = "buyer"     # Chat with the buyer
 
 
 class Negotiation(Base, TimestampMixin):
@@ -110,6 +117,16 @@ class NegotiationMessage(Base):
             values_callable=lambda x: [e.value for e in x],
         ),
         nullable=False,
+    )
+    target: Mapped[MessageTarget] = mapped_column(
+        SQLAlchemyEnum(
+            MessageTarget,
+            name="messagetarget",
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        default=MessageTarget.SELLER,
+        nullable=False,
+        comment="Which chat this message belongs to (seller or buyer)",
     )
     content: Mapped[str] = mapped_column(
         Text,

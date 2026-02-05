@@ -22,7 +22,7 @@ from src.models import (
     DetectedDeal, DealStatus, Negotiation, NegotiationStage,
     Order, OrderType, RawMessage
 )
-from src.services.ai_negotiator import initiate_negotiation, process_seller_response
+from src.services.ai_negotiator import initiate_negotiation, process_seller_response, process_buyer_response
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +255,7 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
     if not sender_id:
         return False
 
-    # Find active negotiation with this seller
+    # First, check if this is a SELLER response
     result = await db.execute(
         select(Negotiation)
         .options(selectinload(Negotiation.deal))
@@ -269,6 +269,8 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
                     NegotiationStage.INITIAL,
                     NegotiationStage.CONTACTED,
                     NegotiationStage.NEGOTIATING,
+                    NegotiationStage.WARM,
+                    NegotiationStage.HANDED_TO_MANAGER,
                 ]),
             )
         )
@@ -276,8 +278,36 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
     negotiation = result.scalar_one_or_none()
 
     if negotiation:
-        logger.info(f"Found active negotiation {negotiation.id} for sender {sender_id}")
+        logger.info(f"Found active negotiation {negotiation.id} for seller {sender_id}")
         await process_seller_response(negotiation, message_text, db)
+        return True
+
+    # Then, check if this is a BUYER response
+    result = await db.execute(
+        select(Negotiation)
+        .options(selectinload(Negotiation.deal))
+        .join(DetectedDeal, Negotiation.deal_id == DetectedDeal.id)
+        .where(
+            and_(
+                or_(
+                    DetectedDeal.buyer_sender_id == sender_id,
+                    DetectedDeal.buyer_chat_id == sender_id,
+                ),
+                Negotiation.stage.in_([
+                    NegotiationStage.INITIAL,
+                    NegotiationStage.CONTACTED,
+                    NegotiationStage.NEGOTIATING,
+                    NegotiationStage.WARM,
+                    NegotiationStage.HANDED_TO_MANAGER,
+                ]),
+            )
+        )
+    )
+    negotiation = result.scalar_one_or_none()
+
+    if negotiation:
+        logger.info(f"Found active negotiation {negotiation.id} for buyer {sender_id}")
+        await process_buyer_response(negotiation, message_text, db)
         return True
 
     return False
