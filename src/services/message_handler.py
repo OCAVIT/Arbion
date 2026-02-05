@@ -533,7 +533,7 @@ async def handle_new_message(event, telegram_service) -> None:
         chat_username = getattr(chat, 'username', None)
         contact_info = f"@{sender_username}" if sender_username else (f"@{chat_username}" if chat_username else f"chat:{chat_id}")
 
-        logger.info(f"New message from {chat_title} ({chat_id}): {raw_text[:50]}...")
+        logger.info(f"New message from {chat_title} (chat_id={chat_id}, sender_id={sender_id}): {raw_text[:50]}...")
 
         async with get_db_context() as db:
             # Save raw message (upsert to handle duplicates)
@@ -600,7 +600,15 @@ async def handle_new_message(event, telegram_service) -> None:
                         if deal:
                             logger.info(f"Auto-matched into deal #{deal.id}")
                             # Запускаем AI переговоры для новой сделки
-                            await initiate_negotiation(deal, db)
+                            try:
+                                logger.info(f"Запускаем initiate_negotiation для сделки #{deal.id}")
+                                negotiation = await initiate_negotiation(deal, db)
+                                if negotiation:
+                                    logger.info(f"Переговоры #{negotiation.id} созданы успешно")
+                                else:
+                                    logger.warning(f"initiate_negotiation вернул None для сделки #{deal.id}")
+                            except Exception as neg_error:
+                                logger.error(f"Ошибка при создании переговоров: {neg_error}", exc_info=True)
 
             # Отмечаем сырое сообщение как обработанное
             result = await db.execute(
