@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
-from src.api import api_router
+from src.api import admin_router, api_router, panel_router
 from src.auth.dependencies import get_current_user_optional
 from src.auth.middleware import AuthMiddleware
 from src.config import settings
@@ -113,8 +113,10 @@ app.mount("/static", StaticFiles(directory="src/static"), name="static")
 # Templates
 templates = Jinja2Templates(directory="src/templates")
 
-# Include API router
-app.include_router(api_router)
+# Include routers
+app.include_router(api_router)  # /api/* endpoints
+app.include_router(admin_router)  # /admin/* web interface
+app.include_router(panel_router)  # /panel/* web interface
 
 
 # Root redirect
