@@ -40,15 +40,21 @@
             <div class="user-info">
                 👋 {{ user.display_name }}
             </div>
-            <button onclick="logout()" class="btn btn-sm btn-outline btn-block">Выход</button>
         </div>
     </aside>
 
     <!-- Main Content -->
     <main class="main-content">
         <header class="content-header">
-            <h1>{% block page_title %}Панель менеджера{% endblock %}</h1>
-            {% block header_actions %}{% endblock %}
+            <div class="header-left">
+                <h1>{% block page_title %}Панель менеджера{% endblock %}</h1>
+            </div>
+            <div class="header-right">
+                {% block header_actions %}{% endblock %}
+                <button onclick="logout()" class="btn btn-sm btn-outline logout-btn" title="Выйти из аккаунта">
+                    🚪 Выход
+                </button>
+            </div>
         </header>
 
         <div class="content-body">

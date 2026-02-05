@@ -191,6 +191,22 @@ a:hover {
     font-weight: 700;
 }
 
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.logout-btn {
+    white-space: nowrap;
+}
+
 .content-body {
     padding: 28px 32px;
     max-width: 1600px;
