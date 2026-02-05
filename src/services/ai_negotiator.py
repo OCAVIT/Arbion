@@ -1,18 +1,22 @@
 """
-AI Negotiator service for warming up cold leads.
+AI Negotiator service для прогрева холодных лидов.
 
-Handles:
-- Sending initial contact messages to sellers
-- Processing seller responses
-- Progressing deals from COLD -> IN_PROGRESS -> WARM
+Функции:
+- Отправка первичных сообщений продавцам и покупателям
+- Обработка ответов с хранением контекста
+- Умное ведение диалога до получения номера телефона
+- Прогресс сделок: COLD -> IN_PROGRESS -> WARM
 """
 
 import logging
+import random
+import re
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, List, Tuple
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from src.config import settings
 from src.models import (
@@ -30,7 +34,11 @@ from src.models import (
 
 logger = logging.getLogger(__name__)
 
-# Initial contact templates for SELLER - casual but normal
+# =====================================================
+# ШАБЛОНЫ СООБЩЕНИЙ
+# =====================================================
+
+# Первичное сообщение продавцу
 INITIAL_SELLER_TEMPLATES = [
     "привет, {product} ещё есть?",
     "здравствуйте, {product} актуально?",
@@ -38,9 +46,10 @@ INITIAL_SELLER_TEMPLATES = [
     "привет! по {product} - актуально?",
     "здравствуйте, интересует {product}, ещё в продаже?",
     "добрый день! {product} ещё есть?",
+    "привет, по поводу {product} - ещё актуально?",
 ]
 
-# Initial contact templates for BUYER
+# Первичное сообщение покупателю
 INITIAL_BUYER_TEMPLATES = [
     "привет, нашёл {product} по твоему запросу, интересно?",
     "здравствуйте, есть {product} - актуально для вас?",
@@ -49,91 +58,256 @@ INITIAL_BUYER_TEMPLATES = [
     "здравствуйте, {product} в наличии - подойдёт?",
 ]
 
-# Follow-up templates based on seller response
-FOLLOWUP_INTERESTED = [
+# Ответы на положительную реакцию (первый ответ)
+FOLLOWUP_POSITIVE_FIRST = [
     "отлично! а состояние какое? есть косяки?",
-    "хорошо, что по состоянию? комплект полный?",
-    "понял, а состояние нормальное? всё работает?",
-    "ок, подскажи по состоянию",
-    "хорошо, а по внешке как? царапины есть?",
+    "супер, что по состоянию скажешь?",
+    "хорошо, а по состоянию как? царапины, сколы есть?",
+    "понял, расскажи про состояние - важно чтобы всё работало",
+    "ок, а комплект полный? коробка есть?",
 ]
 
-FOLLOWUP_PRICE_CHECK = [
-    "понял, а по цене можно подвинуться? готов сегодня забрать",
-    "ясно, если скинешь немного - сразу заберу",
+# Уточнение цены
+FOLLOWUP_PRICE = [
+    "понял, а по цене можно подвинуться немного?",
+    "ясно, если скинешь чуть-чуть - сразу заберу",
     "а торг будет? могу подъехать сегодня",
     "а если чуть дешевле - возьму сейчас",
     "по цене договоримся? заберу быстро",
 ]
 
-# Clarification templates
+# Уточнение состояния (второй этап)
+FOLLOWUP_CONDITION = [
+    "понял, а аккумулятор как держит?",
+    "ясно, а экран без трещин? битых пикселей нет?",
+    "хорошо, а всё работает? камера, звук?",
+    "ок, а зарядка родная? кабель есть?",
+]
+
+# Запрос контакта (финальный этап)
+FOLLOWUP_ASK_CONTACT = [
+    "отлично, давай созвонимся - скинь номер",
+    "хорошо, тогда давай номер телефона - обсудим детали",
+    "понял, скинь номер - наберу сегодня",
+    "ок, давай контакт для связи - телефон или телега",
+    "договорились, скинь номер - свяжусь в течение часа",
+    "супер, давай номер телефона чтоб созвониться",
+]
+
+# Уточнение если непонятно
 FOLLOWUP_UNCLEAR = [
     "не совсем понял, так продаёшь ещё?",
     "можно подробнее? интересует покупка",
     "так актуально или нет?",
+    "прости, не понял - в продаже ещё?",
 ]
 
-# Keywords that indicate seller interest
+# Ответ на негатив (прощание)
+GOODBYE_TEMPLATES = [
+    "понял, спасибо",
+    "ок, если что - пиши",
+    "понял, удачи с продажей",
+]
+
+# Паттерны для определения номера телефона
+PHONE_PATTERNS = [
+    r'\+?[78][\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}',
+    r'\+?[78]\d{10}',
+    r'\b\d{3}[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}\b',
+]
+
+# Ключевые слова
 POSITIVE_KEYWORDS = [
     'да', 'актуально', 'есть', 'продаю', 'готов', 'можно',
     'конечно', 'пишите', 'звоните', 'в наличии', 'ок', 'ok',
+    'давай', 'норм', 'хорошо', 'отлично', 'пойдёт', 'идёт',
+    'работает', 'всё ок', 'могу', 'да конечно', 'угу',
 ]
 
 NEGATIVE_KEYWORDS = [
     'нет', 'продано', 'неактуально', 'не продаю', 'забронировано',
-    'уже нет', 'sold', 'занято',
+    'уже нет', 'sold', 'занято', 'отдал', 'продал', 'не актуально',
+    'извини', 'к сожалению', 'уже забрали',
 ]
 
 PRICE_KEYWORDS = [
     'цена', 'стоит', 'рублей', 'тысяч', 'руб', '₽', 'торг',
+    'тыс', 'тр', 'к ', ' к', 'рубл', 'прошу', 'отдам за',
+]
+
+CONDITION_KEYWORDS = [
+    'состояние', 'царапины', 'сколы', 'работает', 'новый', 'бу',
+    'идеал', 'норм', 'хорошее', 'отличное', 'без косяков',
+    'комплект', 'коробка', 'зарядка', 'аккумулятор', 'экран',
+]
+
+CONTACT_KEYWORDS = [
+    'телефон', 'номер', 'звони', 'набери', 'позвони', 'контакт',
+    'вот номер', 'мой номер', 'телега', 'ватсап', 'whatsapp',
+    'telegram', 'тг', 'вайбер', 'viber',
 ]
 
 
-def analyze_response(text: str) -> str:
+# =====================================================
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# =====================================================
+
+def extract_phone_from_text(text: str) -> Optional[str]:
+    """Извлечение номера телефона из текста."""
+    for pattern in PHONE_PATTERNS:
+        match = re.search(pattern, text)
+        if match:
+            phone = match.group(0)
+            digits = re.sub(r'\D', '', phone)
+            if len(digits) >= 10:
+                return phone
+    return None
+
+
+def analyze_response(text: str) -> Tuple[str, Optional[str]]:
     """
-    Analyze seller's response to determine next action.
+    Анализ ответа продавца/покупателя.
 
     Returns:
-        'positive' - seller interested, continue negotiation
-        'negative' - seller not interested, close deal
-        'price' - seller mentioned price, discuss further
-        'unclear' - need clarification
+        Tuple[sentiment, phone]:
+        - sentiment: 'positive', 'negative', 'price', 'condition', 'contact', 'unclear'
+        - phone: найденный номер телефона или None
     """
     text_lower = text.lower()
 
-    # Check for negative signals first
+    # Сначала проверяем на наличие телефона
+    phone = extract_phone_from_text(text)
+    if phone:
+        return 'contact', phone
+
+    # Проверка на упоминание контакта (без номера)
+    for keyword in CONTACT_KEYWORDS:
+        if keyword in text_lower:
+            return 'contact', None
+
+    # Проверка на негатив
     for keyword in NEGATIVE_KEYWORDS:
         if keyword in text_lower:
-            return 'negative'
+            return 'negative', None
 
-    # Check for price discussion
+    # Проверка на обсуждение цены
     for keyword in PRICE_KEYWORDS:
         if keyword in text_lower:
-            return 'price'
+            return 'price', None
 
-    # Check for positive signals
+    # Проверка на обсуждение состояния
+    for keyword in CONDITION_KEYWORDS:
+        if keyword in text_lower:
+            return 'condition', None
+
+    # Проверка на позитив
     for keyword in POSITIVE_KEYWORDS:
         if keyword in text_lower:
-            return 'positive'
+            return 'positive', None
 
-    return 'unclear'
+    return 'unclear', None
+
+
+async def get_conversation_context(
+    negotiation: Negotiation,
+    db: AsyncSession,
+    target: MessageTarget = MessageTarget.SELLER
+) -> List[dict]:
+    """
+    Получение истории разговора для контекста.
+
+    Returns:
+        Список сообщений в формате [{'role': 'ai'|'seller'|'buyer', 'content': '...'}]
+    """
+    result = await db.execute(
+        select(NegotiationMessage)
+        .where(NegotiationMessage.negotiation_id == negotiation.id)
+        .where(NegotiationMessage.target == target)
+        .order_by(NegotiationMessage.created_at)
+    )
+    messages = result.scalars().all()
+
+    context = []
+    for msg in messages:
+        context.append({
+            'role': msg.role.value,
+            'content': msg.content,
+        })
+
+    return context
+
+
+def count_exchanges(context: List[dict]) -> int:
+    """Подсчёт количества обменов сообщениями (пара AI + ответ)."""
+    ai_count = sum(1 for m in context if m['role'] == 'ai')
+    other_count = sum(1 for m in context if m['role'] in ['seller', 'buyer'])
+    return min(ai_count, other_count)
+
+
+def determine_next_action(
+    sentiment: str,
+    phone: Optional[str],
+    context: List[dict],
+    stage: NegotiationStage
+) -> Tuple[str, Optional[str]]:
+    """
+    Определение следующего действия на основе анализа.
+
+    Returns:
+        Tuple[action, response]:
+        - action: 'respond', 'warm', 'close'
+        - response: текст ответа или None
+    """
+    exchanges = count_exchanges(context)
+
+    # Если получили номер телефона - сделка тёплая!
+    if phone:
+        return 'warm', None
+
+    # Негатив - закрываем
+    if sentiment == 'negative':
+        return 'close', random.choice(GOODBYE_TEMPLATES)
+
+    # Логика в зависимости от количества обменов
+    if exchanges == 0:
+        # Первый ответ - уточняем состояние
+        if sentiment in ['positive', 'price', 'condition']:
+            return 'respond', random.choice(FOLLOWUP_POSITIVE_FIRST)
+        elif sentiment == 'contact':
+            # Упоминают контакт, но номера нет - просим
+            return 'respond', random.choice(FOLLOWUP_ASK_CONTACT)
+        else:
+            return 'respond', random.choice(FOLLOWUP_UNCLEAR)
+
+    elif exchanges == 1:
+        # Второй обмен - обсуждаем цену или состояние
+        if sentiment == 'price':
+            return 'respond', random.choice(FOLLOWUP_PRICE)
+        elif sentiment in ['positive', 'condition']:
+            return 'respond', random.choice(FOLLOWUP_CONDITION)
+        elif sentiment == 'contact':
+            return 'respond', random.choice(FOLLOWUP_ASK_CONTACT)
+        else:
+            return 'respond', random.choice(FOLLOWUP_UNCLEAR)
+
+    elif exchanges >= 2:
+        # Третий+ обмен - пора просить контакт
+        if sentiment == 'contact':
+            # Упоминают контакт но номера нет - уточняем
+            return 'respond', "скинь номер телефона - созвонимся"
+        elif sentiment in ['positive', 'price', 'condition']:
+            return 'respond', random.choice(FOLLOWUP_ASK_CONTACT)
+        else:
+            return 'respond', random.choice(FOLLOWUP_ASK_CONTACT)
+
+    return 'respond', random.choice(FOLLOWUP_UNCLEAR)
 
 
 def generate_response(stage: str, product: str, context: str = "") -> str:
     """
-    Generate AI response based on negotiation stage.
-
-    Args:
-        stage: Current stage ('initial_seller', 'initial_buyer', 'positive', 'price', 'unclear')
-        product: Product name
-        context: Previous conversation context
-
-    Returns:
-        Generated response message
+    Генерация ответа на основе стадии.
+    Для совместимости со старым кодом.
     """
-    import random
-
-    # Make product name lowercase for casual feel
     product_lower = product.lower() if product else "товар"
 
     if stage == 'initial' or stage == 'initial_seller':
@@ -145,60 +319,61 @@ def generate_response(stage: str, product: str, context: str = "") -> str:
         return template.format(product=product_lower)
 
     elif stage == 'positive':
-        return random.choice(FOLLOWUP_INTERESTED)
+        return random.choice(FOLLOWUP_POSITIVE_FIRST)
 
     elif stage == 'price':
-        return random.choice(FOLLOWUP_PRICE_CHECK)
+        return random.choice(FOLLOWUP_PRICE)
+
+    elif stage == 'condition':
+        return random.choice(FOLLOWUP_CONDITION)
+
+    elif stage == 'contact':
+        return random.choice(FOLLOWUP_ASK_CONTACT)
 
     elif stage == 'unclear':
         return random.choice(FOLLOWUP_UNCLEAR)
 
     else:
-        # Default follow-up
         return "Подскажите подробнее, пожалуйста."
 
 
+# =====================================================
+# ОСНОВНЫЕ ФУНКЦИИ
+# =====================================================
+
 async def initiate_negotiation(deal: DetectedDeal, db: AsyncSession) -> Optional[Negotiation]:
     """
-    Start negotiation for a cold deal.
-    Creates Negotiation record and queues initial message.
-
-    Args:
-        deal: The DetectedDeal to negotiate
-        db: Database session
-
-    Returns:
-        Created Negotiation or None if failed
+    Начало переговоров по холодной сделке.
+    Создаёт Negotiation и отправляет первые сообщения продавцу и покупателю.
     """
     try:
-        # Check if negotiation already exists
+        # Проверяем, нет ли уже переговоров
         existing = await db.execute(
             select(Negotiation).where(Negotiation.deal_id == deal.id)
         )
         if existing.scalar_one_or_none():
-            logger.debug(f"Negotiation already exists for deal {deal.id}")
+            logger.debug(f"Переговоры для сделки {deal.id} уже существуют")
             return None
 
-        # Get seller info from sell order
+        # Получаем данные продавца из sell_order
         sell_order = deal.sell_order
         if not sell_order:
-            # Load sell_order from database if not loaded via relationship
             result = await db.execute(
                 select(Order).where(Order.id == deal.sell_order_id)
             )
             sell_order = result.scalar_one_or_none()
             if not sell_order:
-                logger.warning(f"Deal {deal.id} has no sell order (id={deal.sell_order_id})")
+                logger.warning(f"Сделка {deal.id} не имеет sell_order (id={deal.sell_order_id})")
                 return None
 
         seller_chat_id = sell_order.chat_id
         seller_sender_id = sell_order.sender_id
 
         if not seller_chat_id:
-            logger.warning(f"Deal {deal.id} sell order has no chat_id")
+            logger.warning(f"Сделка {deal.id}: sell_order без chat_id")
             return None
 
-        # Create negotiation
+        # Создаём переговоры
         negotiation = Negotiation(
             deal_id=deal.id,
             stage=NegotiationStage.INITIAL,
@@ -208,10 +383,10 @@ async def initiate_negotiation(deal: DetectedDeal, db: AsyncSession) -> Optional
         db.add(negotiation)
         await db.flush()
 
-        # Generate initial message for SELLER
+        # Генерируем первое сообщение продавцу
         seller_message = generate_response('initial_seller', deal.product)
 
-        # Save message to history (for SELLER chat)
+        # Сохраняем в историю (чат с продавцом)
         msg = NegotiationMessage(
             negotiation_id=negotiation.id,
             role=MessageRole.AI,
@@ -220,7 +395,7 @@ async def initiate_negotiation(deal: DetectedDeal, db: AsyncSession) -> Optional
         )
         db.add(msg)
 
-        # Queue message for sending to SELLER
+        # Добавляем в очередь отправки
         outbox_seller = OutboxMessage(
             recipient_id=seller_sender_id or seller_chat_id,
             message_text=seller_message,
@@ -229,14 +404,14 @@ async def initiate_negotiation(deal: DetectedDeal, db: AsyncSession) -> Optional
         )
         db.add(outbox_seller)
 
-        # Also contact the BUYER
+        # Также контактируем покупателя
         buyer_sender_id = deal.buyer_sender_id
         buyer_chat_id = deal.buyer_chat_id
 
         if buyer_sender_id or buyer_chat_id:
             buyer_message = generate_response('initial_buyer', deal.product)
 
-            # Save buyer message to history (for BUYER chat)
+            # Сохраняем в историю (чат с покупателем)
             buyer_msg = NegotiationMessage(
                 negotiation_id=negotiation.id,
                 role=MessageRole.AI,
@@ -245,7 +420,7 @@ async def initiate_negotiation(deal: DetectedDeal, db: AsyncSession) -> Optional
             )
             db.add(buyer_msg)
 
-            # Queue message for sending to BUYER
+            # Добавляем в очередь отправки
             outbox_buyer = OutboxMessage(
                 recipient_id=buyer_sender_id or buyer_chat_id,
                 message_text=buyer_message,
@@ -253,19 +428,18 @@ async def initiate_negotiation(deal: DetectedDeal, db: AsyncSession) -> Optional
                 negotiation_id=negotiation.id,
             )
             db.add(outbox_buyer)
-            logger.info(f"Deal {deal.id}: messages queued for both seller and buyer")
+            logger.info(f"Сделка {deal.id}: сообщения отправлены продавцу и покупателю")
         else:
-            logger.info(f"Deal {deal.id}: message queued for seller only (no buyer contact info)")
+            logger.info(f"Сделка {deal.id}: сообщение отправлено только продавцу (нет контакта покупателя)")
 
-        # Update deal status
+        # Обновляем статус сделки
         deal.status = DealStatus.IN_PROGRESS
 
-        # Note: commit is handled by the caller (handle_new_message)
         return negotiation
 
     except Exception as e:
-        logger.error(f"Failed to initiate negotiation for deal {deal.id}: {e}")
-        raise  # Let caller handle transaction rollback
+        logger.error(f"Ошибка при создании переговоров для сделки {deal.id}: {e}")
+        raise
 
 
 async def process_seller_response(
@@ -274,18 +448,10 @@ async def process_seller_response(
     db: AsyncSession,
 ) -> bool:
     """
-    Process seller's response and generate AI reply.
-
-    Args:
-        negotiation: The Negotiation record
-        response_text: Seller's message text
-        db: Database session
-
-    Returns:
-        True if response processed, False otherwise
+    Обработка ответа продавца с умной логикой ведения диалога.
     """
     try:
-        # Save seller's message (in SELLER chat)
+        # Сохраняем сообщение продавца
         seller_msg = NegotiationMessage(
             negotiation_id=negotiation.id,
             role=MessageRole.SELLER,
@@ -293,67 +459,95 @@ async def process_seller_response(
             content=response_text,
         )
         db.add(seller_msg)
+        await db.flush()
 
-        # Analyze response
-        sentiment = analyze_response(response_text)
-        logger.info(f"Negotiation {negotiation.id}: seller response sentiment = {sentiment}")
+        # Получаем контекст разговора
+        context = await get_conversation_context(negotiation, db, MessageTarget.SELLER)
+
+        # Анализируем ответ
+        sentiment, phone = analyze_response(response_text)
+        logger.info(f"Переговоры {negotiation.id}: sentiment={sentiment}, phone={phone}")
 
         deal = negotiation.deal
 
-        if sentiment == 'negative':
-            # Seller not interested - mark deal as lost
+        # Определяем следующее действие
+        action, response = determine_next_action(sentiment, phone, context, negotiation.stage)
+
+        if action == 'warm':
+            # Сделка тёплая - получили номер телефона!
+            deal.status = DealStatus.WARM
+            deal.ai_insight = f"Продавец заинтересован. Получен контакт: {phone or 'упомянут'}. Последнее сообщение: {response_text[:100]}"
+            negotiation.stage = NegotiationStage.WARM
+            await db.commit()
+            logger.info(f"Сделка {deal.id} стала WARM - получен номер телефона!")
+            return True
+
+        elif action == 'close':
+            # Продавец не заинтересован
             deal.status = DealStatus.LOST
             deal.ai_resolution = f"Продавец отказал: {response_text[:100]}"
             negotiation.stage = NegotiationStage.CLOSED
+
+            # Отправляем прощальное сообщение
+            if response:
+                goodbye_msg = NegotiationMessage(
+                    negotiation_id=negotiation.id,
+                    role=MessageRole.AI,
+                    target=MessageTarget.SELLER,
+                    content=response,
+                )
+                db.add(goodbye_msg)
+
+                outbox = OutboxMessage(
+                    recipient_id=negotiation.seller_sender_id or negotiation.seller_chat_id,
+                    message_text=response,
+                    status=OutboxStatus.PENDING,
+                    negotiation_id=negotiation.id,
+                )
+                db.add(outbox)
+
             await db.commit()
-            logger.info(f"Deal {deal.id} marked as LOST")
+            logger.info(f"Сделка {deal.id} закрыта как LOST")
             return True
 
-        # Check if deal should become warm (after 2+ positive exchanges)
-        msg_count = await db.scalar(
-            select(NegotiationMessage)
-            .where(NegotiationMessage.negotiation_id == negotiation.id)
-            .where(NegotiationMessage.role == MessageRole.SELLER)
-        )
+        elif action == 'respond' and response:
+            # Продолжаем диалог
+            ai_msg = NegotiationMessage(
+                negotiation_id=negotiation.id,
+                role=MessageRole.AI,
+                target=MessageTarget.SELLER,
+                content=response,
+            )
+            db.add(ai_msg)
 
-        if sentiment in ['positive', 'price'] and negotiation.stage != NegotiationStage.INITIAL:
-            # Seller engaged - mark as warm for human takeover
-            deal.status = DealStatus.WARM
-            deal.ai_insight = f"Продавец заинтересован. Последний ответ: {response_text[:100]}"
-            negotiation.stage = NegotiationStage.NEGOTIATING
+            outbox = OutboxMessage(
+                recipient_id=negotiation.seller_sender_id or negotiation.seller_chat_id,
+                message_text=response,
+                status=OutboxStatus.PENDING,
+                negotiation_id=negotiation.id,
+            )
+            db.add(outbox)
+
+            # Обновляем стадию переговоров
+            if negotiation.stage == NegotiationStage.INITIAL:
+                negotiation.stage = NegotiationStage.CONTACTED
+            elif negotiation.stage == NegotiationStage.CONTACTED:
+                negotiation.stage = NegotiationStage.NEGOTIATING
+
+            # Обновляем ai_insight
+            exchanges = count_exchanges(context)
+            deal.ai_insight = f"В диалоге. Обменов: {exchanges + 1}. Последний ответ: {response_text[:50]}"
+
             await db.commit()
-            logger.info(f"Deal {deal.id} marked as WARM - ready for manager")
+            logger.info(f"Переговоры {negotiation.id}: отправлен follow-up")
             return True
 
-        # Generate and queue follow-up message
-        follow_up = generate_response(sentiment, deal.product, response_text)
-
-        ai_msg = NegotiationMessage(
-            negotiation_id=negotiation.id,
-            role=MessageRole.AI,
-            target=MessageTarget.SELLER,
-            content=follow_up,
-        )
-        db.add(ai_msg)
-
-        outbox = OutboxMessage(
-            recipient_id=negotiation.seller_sender_id or negotiation.seller_chat_id,
-            message_text=follow_up,
-            status=OutboxStatus.PENDING,
-            negotiation_id=negotiation.id,
-        )
-        db.add(outbox)
-
-        # Update negotiation stage
-        if negotiation.stage == NegotiationStage.INITIAL:
-            negotiation.stage = NegotiationStage.CONTACTED
-
+        # Если ничего не подошло - просто сохраняем
         await db.commit()
-        logger.info(f"Queued follow-up for negotiation {negotiation.id}")
         return True
 
     except Exception as e:
-        logger.error(f"Failed to process response for negotiation {negotiation.id}: {e}")
+        logger.error(f"Ошибка при обработке ответа продавца для переговоров {negotiation.id}: {e}")
         await db.rollback()
         return False
 
@@ -364,18 +558,10 @@ async def process_buyer_response(
     db: AsyncSession,
 ) -> bool:
     """
-    Process buyer's response and save to chat history.
-
-    Args:
-        negotiation: The Negotiation record
-        response_text: Buyer's message text
-        db: Database session
-
-    Returns:
-        True if response processed, False otherwise
+    Обработка ответа покупателя.
     """
     try:
-        # Save buyer's message (in BUYER chat)
+        # Сохраняем сообщение покупателя
         buyer_msg = NegotiationMessage(
             negotiation_id=negotiation.id,
             role=MessageRole.BUYER,
@@ -383,44 +569,95 @@ async def process_buyer_response(
             content=response_text,
         )
         db.add(buyer_msg)
+        await db.flush()
 
-        # Analyze response
-        sentiment = analyze_response(response_text)
-        logger.info(f"Negotiation {negotiation.id}: buyer response sentiment = {sentiment}")
+        # Получаем контекст разговора с покупателем
+        context = await get_conversation_context(negotiation, db, MessageTarget.BUYER)
+
+        # Анализируем ответ
+        sentiment, phone = analyze_response(response_text)
+        logger.info(f"Переговоры {negotiation.id} (покупатель): sentiment={sentiment}, phone={phone}")
 
         deal = negotiation.deal
 
-        if sentiment == 'negative':
-            # Buyer not interested - note it but don't close deal
-            # (deal can still proceed with seller)
-            deal.ai_insight = (deal.ai_insight or "") + f"\nПокупатель: {response_text[:50]}"
+        # Определяем следующее действие
+        action, response = determine_next_action(sentiment, phone, context, negotiation.stage)
+
+        if action == 'warm' and phone:
+            # Покупатель дал номер - отмечаем
+            deal.ai_insight = (deal.ai_insight or "") + f"\nПокупатель дал контакт: {phone}"
             await db.commit()
-            logger.info(f"Deal {deal.id}: buyer declined, noted")
+            logger.info(f"Сделка {deal.id}: покупатель дал номер")
             return True
 
-        # For positive responses from buyer - just save and note
-        if sentiment in ['positive', 'price']:
-            deal.ai_insight = (deal.ai_insight or "") + f"\nПокупатель заинтересован: {response_text[:50]}"
+        elif action == 'close':
+            # Покупатель отказался
+            deal.ai_insight = (deal.ai_insight or "") + f"\nПокупатель отказался: {response_text[:50]}"
 
+            if response:
+                goodbye_msg = NegotiationMessage(
+                    negotiation_id=negotiation.id,
+                    role=MessageRole.AI,
+                    target=MessageTarget.BUYER,
+                    content=response,
+                )
+                db.add(goodbye_msg)
+
+                outbox = OutboxMessage(
+                    recipient_id=deal.buyer_sender_id or deal.buyer_chat_id,
+                    message_text=response,
+                    status=OutboxStatus.PENDING,
+                    negotiation_id=negotiation.id,
+                )
+                db.add(outbox)
+
+            await db.commit()
+            logger.info(f"Сделка {deal.id}: покупатель отказался")
+            return True
+
+        elif action == 'respond' and response:
+            # Продолжаем диалог с покупателем
+            ai_msg = NegotiationMessage(
+                negotiation_id=negotiation.id,
+                role=MessageRole.AI,
+                target=MessageTarget.BUYER,
+                content=response,
+            )
+            db.add(ai_msg)
+
+            outbox = OutboxMessage(
+                recipient_id=deal.buyer_sender_id or deal.buyer_chat_id,
+                message_text=response,
+                status=OutboxStatus.PENDING,
+                negotiation_id=negotiation.id,
+            )
+            db.add(outbox)
+
+            # Обновляем ai_insight
+            deal.ai_insight = (deal.ai_insight or "") + f"\nПокупатель: {response_text[:30]}"
+
+            await db.commit()
+            logger.info(f"Переговоры {negotiation.id}: отправлен ответ покупателю")
+            return True
+
+        # Просто сохраняем
+        deal.ai_insight = (deal.ai_insight or "") + f"\nПокупатель: {response_text[:50]}"
         await db.commit()
-        logger.info(f"Saved buyer response for negotiation {negotiation.id}")
+        logger.info(f"Сохранён ответ покупателя для переговоров {negotiation.id}")
         return True
 
     except Exception as e:
-        logger.error(f"Failed to process buyer response for negotiation {negotiation.id}: {e}")
+        logger.error(f"Ошибка при обработке ответа покупателя для переговоров {negotiation.id}: {e}")
         await db.rollback()
         return False
 
 
 async def process_cold_deals(db: AsyncSession) -> int:
     """
-    Find cold deals and initiate negotiations.
-    Called periodically by scheduler.
-
-    Returns:
-        Number of negotiations initiated
+    Поиск холодных сделок и инициация переговоров.
+    Вызывается периодически планировщиком.
     """
-    # Find cold deals without negotiations
+    # Находим холодные сделки без переговоров
     result = await db.execute(
         select(DetectedDeal)
         .where(DetectedDeal.status == DealStatus.COLD)
@@ -435,12 +672,12 @@ async def process_cold_deals(db: AsyncSession) -> int:
             if negotiation:
                 initiated += 1
         except Exception as e:
-            logger.error(f"Failed to initiate negotiation for deal {deal.id}: {e}")
+            logger.error(f"Ошибка при инициации переговоров для сделки {deal.id}: {e}")
             await db.rollback()
             continue
 
     if initiated > 0:
         await db.commit()
-        logger.info(f"Initiated {initiated} new negotiations")
+        logger.info(f"Инициировано {initiated} новых переговоров")
 
     return initiated

@@ -38,45 +38,164 @@ SELL_KEYWORDS = [
 
 # Known product patterns (common electronics, etc.)
 PRODUCT_PATTERNS = [
-    r'(iphone\s*\d+\s*(?:pro\s*)?(?:max)?)',
-    r'(айфон\s*\d+\s*(?:про\s*)?(?:макс)?)',
-    r'(samsung\s*(?:galaxy\s*)?[sa]\d+\s*(?:ultra)?)',
-    r'(самсунг\s*(?:галакси\s*)?[sa]\d+\s*(?:ультра)?)',
-    r'(macbook\s*(?:air|pro)?\s*(?:m\d)?)',
-    r'(макбук\s*(?:эйр|про)?\s*(?:м\d)?)',
-    r'(ipad\s*(?:air|pro|mini)?)',
-    r'(airpods\s*(?:pro|max)?)',
+    # iPhone с полной моделью: iPhone 15 Pro Max, iPhone 14, etc.
+    r'(iphone\s*\d+\s*(?:pro\s*max|pro|max|plus)?)',
+    r'(айфон\s*\d+\s*(?:про\s*макс|про|макс|плюс)?)',
+    # Samsung Galaxy
+    r'(samsung\s*(?:galaxy\s*)?[sa]\d+\s*(?:fe\s*)?(?:ultra|plus|\+)?)',
+    r'(самсунг\s*(?:галакси\s*)?[sa]\d+\s*(?:fe\s*)?(?:ультра|плюс)?)',
+    # MacBook
+    r'(macbook\s*(?:air|pro)?\s*(?:m\d)?(?:\s*\d+)?)',
+    r'(макбук\s*(?:эйр|про)?\s*(?:м\d)?(?:\s*\d+)?)',
+    # iPad
+    r'(ipad\s*(?:air|pro|mini)?\s*(?:\d+)?)',
+    r'(айпад\s*(?:эйр|про|мини)?\s*(?:\d+)?)',
+    # AirPods
+    r'(airpods\s*(?:pro|max)?\s*(?:\d+)?)',
+    r'(эйрподс?\s*(?:про|макс)?\s*(?:\d+)?)',
+    # Gaming consoles
     r'(playstation\s*\d+|ps\s*\d+)',
+    r'(плейстейшн\s*\d+|пс\s*\d+)',
     r'(xbox\s*(?:series\s*)?[xs]?)',
-    r'(nintendo\s*switch)',
+    r'(nintendo\s*switch(?:\s*lite|oled)?)',
+    # Watches
+    r'(apple\s*watch\s*(?:se|ultra)?\s*(?:series\s*)?\d*)',
+    r'(эпл\s*вотч\s*(?:се|ультра)?\s*(?:серия\s*)?\d*)',
+    # Другая электроника
+    r'(dyson\s*\w+)',
+    r'(дайсон\s*\w+)',
 ]
 
 # Price patterns - more specific to avoid matching model numbers
 PRICE_PATTERNS = [
-    r'(?:цена|за|стоит|стоимость|прошу|отдам за|продам за)[:\s]*(\d[\d\s]*(?:[.,]\d+)?)\s*(?:т\.?р\.?|тыс\.?|к|руб|р|₽|\$)?',
-    r'(\d[\d\s]*(?:[.,]\d+)?)\s*(?:т\.?р\.?|тыс\.?|тысяч|к)\b',
-    r'(\d{2,}[\d\s]*(?:[.,]\d+)?)\s*(?:руб|р|₽)\b',
+    # Explicit price markers: "цена 100к", "за 50 тыс", "стоит 30000"
+    r'(?:цена|за|стоит|стоимость|прошу|отдам за|продам за|продаю за|хочу)[:\s]*(\d[\d\s]*(?:[.,]\d+)?)\s*(?:т\.?р\.?|тыс\.?|к|руб|р|₽|\$)?',
+    # Shorthand with multiplier: "100к", "50 тыс", "30т.р.", "100 к" (разрешаем пробел перед к)
+    r'(\d[\d\s]*(?:[.,]\d+)?)\s*(?:т\.?р\.?|тыс\.?|тысяч|к)(?:\b|[,.\s]|$)',
+    # Full rubles: "30000 руб", "50000₽", "100000р"
+    r'(\d{4,}[\d\s]*(?:[.,]\d+)?)\s*(?:руб\.?|р\.?|₽)',
+    # Standalone large number (5-7 digits): likely a price
+    r'(?:^|[^\d])(\d{5,7})(?:[^\d]|$)',
+    # Number followed by "рублей": "50000 рублей"
+    r'(\d[\d\s]*(?:[.,]\d+)?)\s*рубл',
 ]
 
-# Region patterns
+# Phone number patterns to detect warm deals
+PHONE_PATTERNS = [
+    r'\+?[78][\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}',  # +7 (999) 123-45-67
+    r'\+?[78]\d{10}',  # +79991234567
+    r'\b\d{3}[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}\b',  # 999-123-45-67
+]
+
+# Region patterns - expanded list with common abbreviations
 REGIONS = [
-    'москва', 'мск', 'питер', 'спб', 'санкт-петербург', 'петербург',
-    'новосибирск', 'екатеринбург', 'казань', 'нижний новгород',
-    'челябинск', 'самара', 'омск', 'ростов', 'уфа', 'красноярск',
-    'пермь', 'воронеж', 'волгоград', 'краснодар', 'саратов',
-    'тюмень', 'тольятти', 'ижевск', 'барнаул', 'ульяновск',
-    'иркутск', 'хабаровск', 'ярославль', 'владивосток', 'махачкала',
-    'томск', 'оренбург', 'кемерово', 'новокузнецк', 'рязань',
+    'москва', 'мск', 'moscow', 'мос',
+    'питер', 'спб', 'санкт-петербург', 'петербург', 'ленинград',
+    'новосибирск', 'нск', 'новосиб',
+    'екатеринбург', 'екб', 'екат',
+    'казань', 'кзн',
+    'нижний новгород', 'нн', 'нижний',
+    'челябинск', 'чел', 'челяба',
+    'самара', 'смр',
+    'омск',
+    'ростов', 'ростов-на-дону', 'рнд', 'ростов на дону',
+    'уфа',
+    'красноярск', 'крск',
+    'пермь',
+    'воронеж', 'врн',
+    'волгоград', 'влг',
+    'краснодар', 'крд',
+    'саратов',
+    'тюмень',
+    'тольятти',
+    'ижевск',
+    'барнаул',
+    'ульяновск',
+    'иркутск',
+    'хабаровск',
+    'ярославль',
+    'владивосток', 'влад',
+    'махачкала',
+    'томск',
+    'оренбург',
+    'кемерово',
+    'новокузнецк',
+    'рязань',
+    'калининград', 'клгд',
+    'сочи',
+    'астрахань',
+    'пенза',
+    'липецк',
+    'тула',
+    'киров',
+    'чебоксары',
+    'курск',
+    'ставрополь',
+    'улан-удэ',
+    'тверь',
+    'брянск',
+    'белгород',
+    'сургут',
+    'вологда',
+    'владимир',
+    'архангельск',
+    'смоленск',
+    'калуга',
+    'орёл', 'орел',
+    'мурманск',
+    'подольск',
+    'бийск',
+    'прокопьевск',
+    'балашиха',
+    'рыбинск',
+    'северодвинск',
+    'армавир',
+    'балаково',
+    'королёв', 'королев',
+    'химки',
+    'мытищи',
+    'люберцы',
+    'одинцово',
+    'подмосковье', 'мо',
 ]
 
 # Normalize region names
 REGION_NORMALIZE = {
     'мск': 'Москва',
     'москва': 'Москва',
+    'moscow': 'Москва',
+    'мос': 'Москва',
     'спб': 'Санкт-Петербург',
     'питер': 'Санкт-Петербург',
     'санкт-петербург': 'Санкт-Петербург',
     'петербург': 'Санкт-Петербург',
+    'ленинград': 'Санкт-Петербург',
+    'нск': 'Новосибирск',
+    'новосиб': 'Новосибирск',
+    'екб': 'Екатеринбург',
+    'екат': 'Екатеринбург',
+    'кзн': 'Казань',
+    'нн': 'Нижний Новгород',
+    'нижний': 'Нижний Новгород',
+    'чел': 'Челябинск',
+    'челяба': 'Челябинск',
+    'смр': 'Самара',
+    'рнд': 'Ростов-на-Дону',
+    'ростов': 'Ростов-на-Дону',
+    'ростов на дону': 'Ростов-на-Дону',
+    'ростов-на-дону': 'Ростов-на-Дону',
+    'крск': 'Красноярск',
+    'врн': 'Воронеж',
+    'влг': 'Волгоград',
+    'крд': 'Краснодар',
+    'влад': 'Владивосток',
+    'клгд': 'Калининград',
+    'орёл': 'Орёл',
+    'орел': 'Орёл',
+    'королёв': 'Королёв',
+    'королев': 'Королёв',
+    'мо': 'Московская область',
+    'подмосковье': 'Московская область',
 }
 
 
@@ -97,72 +216,143 @@ def detect_order_type(text: str) -> Optional[OrderType]:
 
 def extract_product(text: str) -> str:
     """
-    Extract product name using known patterns.
-    Falls back to extracting text near buy/sell keyword.
+    Извлечение названия товара из текста.
+    Использует известные паттерны, затем fallback на текст после ключевого слова.
     """
     text_lower = text.lower()
 
-    # Try known product patterns first
+    # Сначала пробуем известные паттерны продуктов
     for pattern in PRODUCT_PATTERNS:
         match = re.search(pattern, text_lower, re.IGNORECASE)
         if match:
             product = match.group(1).strip()
-            # Capitalize properly
-            return product.title().replace('Iphone', 'iPhone').replace('Macbook', 'MacBook').replace('Ipad', 'iPad').replace('Airpods', 'AirPods')
+            # Правильная капитализация для брендов
+            product = normalize_product_name(product)
+            return product
 
-    # Fallback: extract text after buy/sell keyword
+    # Fallback: извлекаем текст после ключевого слова купли/продажи
     all_keywords = BUY_KEYWORDS + SELL_KEYWORDS
     for keyword in all_keywords:
         if keyword in text_lower:
             idx = text_lower.find(keyword)
             after_keyword = text[idx + len(keyword):].strip()
-            # Take first meaningful chunk (up to comma, newline, or price mention)
+            # Берём текст до запятой, переноса строки или цены
             chunk = re.split(r'[,\n]|(?:\d+\s*(?:т\.?р|тыс|к|руб|р|₽))', after_keyword)[0].strip()
-            if chunk and len(chunk) > 3:
-                # Clean up
+            if chunk and len(chunk) > 2:
+                # Очистка
                 chunk = re.sub(r'^[!.\s]+', '', chunk)
-                chunk = chunk[:100]  # Limit length
+                chunk = chunk[:100]  # Ограничение длины
                 return chunk if chunk else "Товар"
 
     return "Товар"
 
 
+def normalize_product_name(product: str) -> str:
+    """
+    Нормализация названия продукта с правильной капитализацией брендов.
+    """
+    # Сначала применяем title() для базовой капитализации
+    product = product.title()
+
+    # Исправляем известные бренды
+    replacements = {
+        'Iphone': 'iPhone',
+        'Ipad': 'iPad',
+        'Macbook': 'MacBook',
+        'Airpods': 'AirPods',
+        'Airpod': 'AirPod',
+        'Imac': 'iMac',
+        'Ipod': 'iPod',
+        'Apple Watch': 'Apple Watch',
+        'Samsung': 'Samsung',
+        'Galaxy': 'Galaxy',
+        'Playstation': 'PlayStation',
+        'Xbox': 'Xbox',
+        'Nintendo': 'Nintendo',
+        'Dyson': 'Dyson',
+        ' Pro Max': ' Pro Max',
+        ' Pro ': ' Pro ',
+        ' Max': ' Max',
+        ' Plus': ' Plus',
+        ' Ultra': ' Ultra',
+        ' Air': ' Air',
+        ' Mini': ' Mini',
+        ' Se': ' SE',
+    }
+
+    for old, new in replacements.items():
+        product = product.replace(old, new)
+
+    return product
+
+
 def extract_price(text: str) -> Optional[Decimal]:
     """
-    Extract price from message text.
-    Handles formats like: 100к, 100 тыс, 100000 руб, цена 100к
+    Извлечение цены из текста сообщения.
+    Обрабатывает форматы: 100к, 100 тыс, 100000 руб, цена 100к
     """
     text_lower = text.lower()
 
+    # Собираем все найденные цены
+    found_prices = []
+
     for pattern in PRICE_PATTERNS:
-        match = re.search(pattern, text_lower)
-        if match:
+        for match in re.finditer(pattern, text_lower):
             try:
                 price_str = match.group(1).replace(' ', '').replace(',', '.')
                 price = Decimal(price_str)
 
-                # Check if followed by 'к' or 'тыс' multiplier
+                # Проверяем множитель 'к' или 'тыс'
                 full_match = match.group(0).lower()
                 if any(m in full_match for m in ['к', 'тыс', 'т.р', 'тр']):
                     price *= 1000
 
-                # Sanity check - prices usually between 1000 and 10000000
+                # Проверка диапазона - цены обычно от 1000 до 10000000
                 if 1000 <= price <= 10000000:
-                    return price
+                    found_prices.append(price)
             except Exception:
                 pass
+
+    # Возвращаем наиболее вероятную цену (предпочитаем среднюю)
+    if found_prices:
+        # Если найдено несколько цен, берём первую (обычно основная цена)
+        return found_prices[0]
 
     return None
 
 
+def extract_phone(text: str) -> Optional[str]:
+    """
+    Извлечение номера телефона из текста.
+    Возвращает найденный номер или None.
+    """
+    for pattern in PHONE_PATTERNS:
+        match = re.search(pattern, text)
+        if match:
+            phone = match.group(0)
+            # Нормализация - оставляем только цифры
+            digits = re.sub(r'\D', '', phone)
+            if len(digits) >= 10:
+                return phone
+    return None
+
+
 def extract_region(text: str) -> Optional[str]:
-    """Extract region/city from message text."""
+    """
+    Извлечение региона/города из текста сообщения.
+    Поддерживает сокращения и разные варианты написания.
+    """
     text_lower = text.lower()
 
+    # Сначала ищем точные совпадения для сокращений
     for region in REGIONS:
-        if region in text_lower:
-            # Return normalized name if available
-            return REGION_NORMALIZE.get(region, region.title())
+        # Для коротких сокращений используем границы слов
+        if len(region) <= 3:
+            if re.search(rf'\b{re.escape(region)}\b', text_lower):
+                return REGION_NORMALIZE.get(region, region.title())
+        else:
+            if region in text_lower:
+                return REGION_NORMALIZE.get(region, region.title())
 
     return None
 
@@ -362,58 +552,60 @@ async def handle_new_message(event, telegram_service) -> None:
             )
             await db.execute(stmt)
 
-            # Detect order type
-            order_type = detect_order_type(raw_text)
+            # ВАЖНО: Сначала проверяем, является ли сообщение ответом на активные переговоры
+            # Это критично, т.к. ответ "да, продаю" содержит ключевое слово и иначе
+            # обработается как новая заявка вместо ответа на переговоры
+            is_negotiation_response = await check_negotiation_response(db, sender_id, raw_text)
 
-            if order_type:
-                # Extract product, price, and region
-                product = extract_product(raw_text)
-                price = extract_price(raw_text)
-                region = extract_region(raw_text)
+            if not is_negotiation_response:
+                # Если это не ответ на переговоры - проверяем, является ли это новой заявкой
+                order_type = detect_order_type(raw_text)
 
-                logger.info(f"Parsed: type={order_type.value}, product={product}, price={price}, region={region}")
+                if order_type:
+                    # Извлекаем товар, цену и регион
+                    product = extract_product(raw_text)
+                    price = extract_price(raw_text)
+                    region = extract_region(raw_text)
 
-                # Check if order already exists
-                existing = await db.execute(
-                    select(Order).where(
-                        Order.chat_id == chat_id,
-                        Order.message_id == message_id,
+                    logger.info(f"Parsed: type={order_type.value}, product={product}, price={price}, region={region}")
+
+                    # Проверяем, существует ли уже такая заявка
+                    existing = await db.execute(
+                        select(Order).where(
+                            Order.chat_id == chat_id,
+                            Order.message_id == message_id,
+                        )
                     )
-                )
-                if not existing.scalar_one_or_none():
-                    # Create order
-                    order = Order(
-                        order_type=order_type,
-                        chat_id=chat_id,
-                        sender_id=sender_id,
-                        message_id=message_id,
-                        product=product,
-                        price=price,
-                        region=region,
-                        raw_text=raw_text,
-                        contact_info=contact_info,
-                        is_active=True,
-                    )
-                    db.add(order)
-                    await db.flush()  # Get order ID
+                    if not existing.scalar_one_or_none():
+                        # Создаём заявку
+                        order = Order(
+                            order_type=order_type,
+                            chat_id=chat_id,
+                            sender_id=sender_id,
+                            message_id=message_id,
+                            product=product,
+                            price=price,
+                            region=region,
+                            raw_text=raw_text,
+                            contact_info=contact_info,
+                            is_active=True,
+                        )
+                        db.add(order)
+                        await db.flush()  # Получаем ID заявки
 
-                    logger.info(
-                        f"Created {order_type.value} order #{order.id}: {product} "
-                        f"(price: {price}, region: {region})"
-                    )
+                        logger.info(
+                            f"Created {order_type.value} order #{order.id}: {product} "
+                            f"(price: {price}, region: {region})"
+                        )
 
-                    # Try to match with opposite orders
-                    deal = await try_match_orders(db, order)
-                    if deal:
-                        logger.info(f"Auto-matched into deal #{deal.id}")
-                        # Start AI negotiation for new deal
-                        await initiate_negotiation(deal, db)
-            else:
-                # Only check for negotiation response if this wasn't a new order
-                # (to avoid treating the order message as a response)
-                await check_negotiation_response(db, sender_id, raw_text)
+                        # Пытаемся найти совпадение с противоположными заявками
+                        deal = await try_match_orders(db, order)
+                        if deal:
+                            logger.info(f"Auto-matched into deal #{deal.id}")
+                            # Запускаем AI переговоры для новой сделки
+                            await initiate_negotiation(deal, db)
 
-            # Mark raw message as processed
+            # Отмечаем сырое сообщение как обработанное
             result = await db.execute(
                 select(RawMessage).where(
                     RawMessage.chat_id == chat_id,
