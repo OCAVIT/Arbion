@@ -13,7 +13,7 @@ import re
 from decimal import Decimal
 from typing import Optional, Tuple
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import selectinload
 
@@ -449,18 +449,7 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
     try:
         logger.info(f">>> check_negotiation_response: sender_id={sender_id}, текст: '{message_text[:50]}...'")
 
-        # Сначала получим ВСЕ переговоры для диагностики
-        all_negotiations = await db.execute(
-            select(Negotiation).options(selectinload(Negotiation.deal))
-        )
-        all_negs = all_negotiations.scalars().all()
-
-        logger.info(
-            f">>> Всего переговоров в БД: {len(all_negs)}. "
-            f"IDs: {[(n.id, n.seller_sender_id, n.stage.value) for n in all_negs[:5]]}"
-        )
-
-        # Проверяем, является ли это ответом ПРОДАВЦА
+        # Проверяем, является ли это ответом ПРОДАВЦА (берём самые свежие переговоры)
         seller_query = (
             select(Negotiation)
             .options(selectinload(Negotiation.deal))
@@ -473,6 +462,8 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
                     Negotiation.stage != NegotiationStage.CLOSED,
                 )
             )
+            .order_by(Negotiation.id.desc())
+            .limit(1)
         )
         result = await db.execute(seller_query)
         negotiation = result.scalar_one_or_none()
@@ -488,7 +479,7 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
 
         logger.info(f">>> Переговоры для продавца sender_id={sender_id} НЕ найдены, проверяем покупателя...")
 
-        # Проверяем, является ли это ответом ПОКУПАТЕЛЯ
+        # Проверяем, является ли это ответом ПОКУПАТЕЛЯ (берём самые свежие переговоры)
         buyer_query = (
             select(Negotiation)
             .options(selectinload(Negotiation.deal))
@@ -502,6 +493,8 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
                     Negotiation.stage != NegotiationStage.CLOSED,
                 )
             )
+            .order_by(Negotiation.id.desc())
+            .limit(1)
         )
         result = await db.execute(buyer_query)
         negotiation = result.scalar_one_or_none()
@@ -515,46 +508,7 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
             logger.info(f">>> process_buyer_response вернул: {success}")
             return True
 
-        # Диагностика: проверим сколько активных переговоров вообще есть
-        count_result = await db.execute(
-            select(func.count()).select_from(Negotiation).where(
-                Negotiation.stage != NegotiationStage.CLOSED
-            )
-        )
-        active_count = count_result.scalar() or 0
-
-        # Также проверим есть ли переговоры с этим seller_sender_id (без фильтра по stage)
-        all_for_seller = await db.execute(
-            select(Negotiation).where(
-                or_(
-                    Negotiation.seller_sender_id == sender_id,
-                    Negotiation.seller_chat_id == sender_id,
-                )
-            )
-        )
-        seller_negotiations = all_for_seller.scalars().all()
-
-        # Проверим также покупателя без фильтра stage
-        all_for_buyer = await db.execute(
-            select(Negotiation)
-            .join(DetectedDeal, Negotiation.deal_id == DetectedDeal.id)
-            .where(
-                or_(
-                    DetectedDeal.buyer_sender_id == sender_id,
-                    DetectedDeal.buyer_chat_id == sender_id,
-                )
-            )
-        )
-        buyer_negotiations = all_for_buyer.scalars().all()
-
-        logger.warning(
-            f">>> Переговоры для sender_id={sender_id} НЕ НАЙДЕНЫ! "
-            f"Активных переговоров: {active_count}. "
-            f"С этим seller_id (любой stage): {len(seller_negotiations)} "
-            f"[stages: {[n.stage.value for n in seller_negotiations]}]. "
-            f"С этим buyer_id (любой stage): {len(buyer_negotiations)} "
-            f"[stages: {[n.stage.value for n in buyer_negotiations]}]"
-        )
+        logger.info(f">>> Активные переговоры для sender_id={sender_id} не найдены")
         return False
 
     except Exception as e:
