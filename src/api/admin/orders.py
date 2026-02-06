@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import require_owner
 from src.db import get_db
-from src.models import MonitoredChat, Order, OrderType, User
+from src.models import DetectedDeal, MonitoredChat, Order, OrderType, User
 from src.schemas.order import OrderListResponse, OrderResponse, OrderStatsResponse
 
 router = APIRouter(prefix="/orders")
@@ -131,7 +131,7 @@ async def delete_order(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_owner),
 ):
-    """Delete (deactivate) an order."""
+    """Hard-delete an order. Fails if order is linked to a deal."""
     order = await db.get(Order, order_id)
 
     if not order:
@@ -140,8 +140,21 @@ async def delete_order(
             detail="Order not found",
         )
 
-    # Soft delete - just deactivate
-    order.is_active = False
+    # Проверяем, не привязана ли заявка к сделке
+    linked_deal = await db.execute(
+        select(DetectedDeal.id).where(
+            (DetectedDeal.buy_order_id == order_id)
+            | (DetectedDeal.sell_order_id == order_id)
+        ).limit(1)
+    )
+    deal_id = linked_deal.scalar_one_or_none()
+    if deal_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Заявка привязана к сделке #{deal_id}. Сначала удалите сделку.",
+        )
+
+    await db.delete(order)
     await db.commit()
 
     return {"success": True}
