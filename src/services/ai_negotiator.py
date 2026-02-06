@@ -164,9 +164,31 @@ def extract_phone_from_text(text: str) -> Optional[str]:
     return None
 
 
-def analyze_response(text: str) -> Tuple[str, Optional[str]]:
+def _is_condition_question(last_ai_message: str) -> bool:
+    """Проверяет, спрашивал ли бот о состоянии/дефектах."""
+    lower = last_ai_message.lower()
+    condition_question_markers = [
+        'трещин', 'царапин', 'сколы', 'сколов', 'битых пикселей',
+        'косяки', 'косяков', 'дефект', 'состояние', 'работает',
+        'аккумулятор', 'камера', 'звук', 'экран',
+    ]
+    return any(marker in lower for marker in condition_question_markers)
+
+
+# Слова-отрицания в коротких ответах: "нет"/"нету"/"неа"/"неа-нету" = нет проблем (в контексте вопроса о дефектах)
+_DENIAL_WORD = r'(?:нет[уа]?|не[ату]+|неа)'
+_SHORT_DENIAL_PATTERN = re.compile(
+    rf'^[\s]*{_DENIAL_WORD}(?:[\s,.\-!]+{_DENIAL_WORD})?[\s,.\-!]*$', re.IGNORECASE
+)
+
+
+def analyze_response(text: str, last_ai_message: str = "") -> Tuple[str, Optional[str]]:
     """
     Анализ ответа продавца/покупателя.
+
+    Args:
+        text: Текст ответа
+        last_ai_message: Последнее сообщение бота (для контекста)
 
     Returns:
         Tuple[sentiment, phone]:
@@ -185,9 +207,20 @@ def analyze_response(text: str) -> Tuple[str, Optional[str]]:
         if keyword in text_lower:
             return 'contact', None
 
-    # Проверка на негатив
+    # Контекстная проверка: если бот спрашивал о дефектах,
+    # а ответ — короткое "нет"/"нету"/"неа", это значит "нет проблем" = позитив
+    if last_ai_message and _is_condition_question(last_ai_message):
+        if _SHORT_DENIAL_PATTERN.match(text_lower):
+            return 'positive', None
+
+    # Проверка на явный негатив (продано, не продаю, и т.д.)
+    # "нет" проверяем только как полное слово, не как подстроку
     for keyword in NEGATIVE_KEYWORDS:
-        if keyword in text_lower:
+        if keyword == 'нет':
+            # "нет" только как отдельное слово (не "нету", "нетак" и т.д.)
+            if re.search(r'\bнет\b', text_lower) and not re.search(r'\bнету\b', text_lower):
+                return 'negative', None
+        elif keyword in text_lower:
             return 'negative', None
 
     # Проверка на обсуждение цены
@@ -478,8 +511,15 @@ async def process_seller_response(
         # Получаем контекст разговора
         context = await get_conversation_context(negotiation, db, MessageTarget.SELLER)
 
-        # Анализируем ответ
-        sentiment, phone = analyze_response(response_text)
+        # Находим последнее сообщение бота для контекстного анализа
+        last_ai_msg = ""
+        for msg in reversed(context):
+            if msg['role'] == 'ai':
+                last_ai_msg = msg['content']
+                break
+
+        # Анализируем ответ с учётом контекста
+        sentiment, phone = analyze_response(response_text, last_ai_msg)
         logger.info(f"Переговоры {negotiation.id}: sentiment={sentiment}, phone={phone}")
 
         deal = negotiation.deal
@@ -600,8 +640,15 @@ async def process_buyer_response(
         # Получаем контекст разговора с покупателем
         context = await get_conversation_context(negotiation, db, MessageTarget.BUYER)
 
-        # Анализируем ответ
-        sentiment, phone = analyze_response(response_text)
+        # Находим последнее сообщение бота для контекстного анализа
+        last_ai_msg = ""
+        for msg in reversed(context):
+            if msg['role'] == 'ai':
+                last_ai_msg = msg['content']
+                break
+
+        # Анализируем ответ с учётом контекста
+        sentiment, phone = analyze_response(response_text, last_ai_msg)
         logger.info(f"Переговоры {negotiation.id} (покупатель): sentiment={sentiment}, phone={phone}")
 
         deal = negotiation.deal
