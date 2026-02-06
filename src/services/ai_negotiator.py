@@ -471,15 +471,13 @@ async def initiate_negotiation(deal: DetectedDeal, db: AsyncSession) -> Optional
             return None
 
         # Получаем данные продавца из sell_order
-        sell_order = deal.sell_order
+        result = await db.execute(
+            select(Order).where(Order.id == deal.sell_order_id)
+        )
+        sell_order = result.scalar_one_or_none()
         if not sell_order:
-            result = await db.execute(
-                select(Order).where(Order.id == deal.sell_order_id)
-            )
-            sell_order = result.scalar_one_or_none()
-            if not sell_order:
-                logger.warning(f"Сделка {deal.id} не имеет sell_order (id={deal.sell_order_id})")
-                return None
+            logger.warning(f"Сделка {deal.id} не имеет sell_order (id={deal.sell_order_id})")
+            return None
 
         seller_chat_id = sell_order.chat_id
         seller_sender_id = sell_order.sender_id
@@ -613,10 +611,8 @@ async def process_seller_response(
         # Извлекаем данные из ответа продавца (lazy import для избежания circular import)
         from src.services.message_handler import extract_price, extract_region, extract_quantity
 
-        sell_order = deal.sell_order
-        if not sell_order:
-            result_order = await db.execute(select(Order).where(Order.id == deal.sell_order_id))
-            sell_order = result_order.scalar_one_or_none()
+        result_order = await db.execute(select(Order).where(Order.id == deal.sell_order_id))
+        sell_order = result_order.scalar_one_or_none()
 
         if not deal.sell_price:
             extracted_price = extract_price(response_text)
@@ -781,10 +777,8 @@ async def process_buyer_response(
         # Извлекаем данные из ответа покупателя
         from src.services.message_handler import extract_price, extract_region, extract_quantity
 
-        buy_order = deal.buy_order
-        if not buy_order:
-            result_order = await db.execute(select(Order).where(Order.id == deal.buy_order_id))
-            buy_order = result_order.scalar_one_or_none()
+        result_order = await db.execute(select(Order).where(Order.id == deal.buy_order_id))
+        buy_order = result_order.scalar_one_or_none()
 
         if not deal.buy_price:
             extracted_price = extract_price(response_text)
