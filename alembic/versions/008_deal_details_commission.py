@@ -9,6 +9,7 @@ Create Date: 2026-02-06
 from typing import Sequence, Union
 
 from alembic import op
+from sqlalchemy import inspect
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
@@ -18,22 +19,35 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _col_exists(table: str, column: str) -> bool:
+    """Check if a column already exists (idempotency guard)."""
+    bind = op.get_bind()
+    insp = inspect(bind)
+    return column in [c["name"] for c in insp.get_columns(table)]
+
+
 def upgrade() -> None:
     """Add deal detail fields, commission_rate, manager_commission."""
     # detected_deals — new nullable columns
-    op.add_column("detected_deals", sa.Column("notes", sa.Text(), nullable=True))
-    op.add_column("detected_deals", sa.Column("target_sell_price", sa.Numeric(12, 2), nullable=True))
-    op.add_column("detected_deals", sa.Column("seller_condition", sa.String(500), nullable=True))
-    op.add_column("detected_deals", sa.Column("seller_city", sa.String(100), nullable=True))
-    op.add_column("detected_deals", sa.Column("seller_specs", sa.String(500), nullable=True))
-    op.add_column("detected_deals", sa.Column("seller_phone", sa.String(50), nullable=True))
-    op.add_column("detected_deals", sa.Column("buyer_phone", sa.String(50), nullable=True))
+    for col_name, col_type in [
+        ("notes", sa.Text()),
+        ("target_sell_price", sa.Numeric(12, 2)),
+        ("seller_condition", sa.String(500)),
+        ("seller_city", sa.String(100)),
+        ("seller_specs", sa.String(500)),
+        ("seller_phone", sa.String(50)),
+        ("buyer_phone", sa.String(50)),
+    ]:
+        if not _col_exists("detected_deals", col_name):
+            op.add_column("detected_deals", sa.Column(col_name, col_type, nullable=True))
 
     # users — commission_rate
-    op.add_column("users", sa.Column("commission_rate", sa.Numeric(5, 4), nullable=True, server_default="0.10"))
+    if not _col_exists("users", "commission_rate"):
+        op.add_column("users", sa.Column("commission_rate", sa.Numeric(5, 4), nullable=True, server_default="0.10"))
 
     # ledger — manager_commission
-    op.add_column("ledger", sa.Column("manager_commission", sa.Numeric(12, 2), nullable=True))
+    if not _col_exists("ledger", "manager_commission"):
+        op.add_column("ledger", sa.Column("manager_commission", sa.Numeric(12, 2), nullable=True))
 
 
 def downgrade() -> None:

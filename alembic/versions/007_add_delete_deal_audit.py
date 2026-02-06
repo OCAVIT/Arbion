@@ -9,7 +9,6 @@ Create Date: 2026-02-06
 from typing import Sequence, Union
 
 from alembic import op
-from sqlalchemy import text
 
 # revision identifiers, used by Alembic.
 revision: str = "007_add_delete_deal_audit"
@@ -20,14 +19,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Add delete_deal to auditaction enum."""
-    connection = op.get_bind()
-    try:
-        connection.execute(
-            text("ALTER TYPE auditaction ADD VALUE IF NOT EXISTS 'delete_deal'")
-        )
-        connection.commit()
-    except Exception as e:
-        print(f"Note: Could not add enum value 'delete_deal': {e}")
+    op.execute("ALTER TYPE auditaction ADD VALUE IF NOT EXISTS 'delete_deal'")
 
 
 def downgrade() -> None:
