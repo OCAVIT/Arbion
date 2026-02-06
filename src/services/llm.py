@@ -60,6 +60,9 @@ BUYER_SYSTEM_PROMPT = """\
 - Как обычный человек в мессенджере, строчными буквами
 - НЕ представляйся, НЕ называй своё имя
 - НЕ говори что ты бот или ИИ
+- НИКОГДА не называй конкретную цену или стоимость товара
+- Если покупатель спрашивает цену — спроси на какой бюджет он рассчитывает
+- Цена — это внутренняя информация, покупатель НЕ должен её знать
 
 Стратегия:
 1. Уточни интерес и детали (какую конфигурацию хочет, бюджет)
@@ -98,6 +101,8 @@ INITIAL_BUYER_SYSTEM_PROMPT = """\
 - Упомяни название товара
 - Без эмодзи
 - НЕ представляйся
+- НИКОГДА не упоминай конкретную цену, стоимость или сумму
+- Просто предложи товар без цифр
 
 Ответ строго в JSON: {"action": "respond", "message": "текст", "phone": null}\
 """
@@ -109,6 +114,7 @@ def _build_messages(
     product: str,
     price: Optional[str] = None,
     role_mapping: Optional[dict] = None,
+    missing_data_hint: Optional[str] = None,
 ) -> list:
     """Build OpenAI messages array from conversation context."""
     if role_mapping is None:
@@ -118,8 +124,12 @@ def _build_messages(
     if price:
         product_info += f", цена: {price}"
 
+    system_content = f"{system_prompt}\n\n{product_info}"
+    if missing_data_hint:
+        system_content += f"\n\n{missing_data_hint}"
+
     messages = [
-        {"role": "system", "content": f"{system_prompt}\n\n{product_info}"},
+        {"role": "system", "content": system_content},
     ]
 
     for msg in context:
@@ -158,6 +168,7 @@ async def generate_negotiation_response(
     context: List[dict],
     product: str,
     price: Optional[str] = None,
+    missing_data_hint: Optional[str] = None,
 ) -> Optional[dict]:
     """
     Generate a negotiation response using OpenAI.
@@ -167,6 +178,7 @@ async def generate_negotiation_response(
         context: conversation history [{'role': 'ai'|'seller'|'buyer', 'content': '...'}]
         product: product name
         price: product price (optional)
+        missing_data_hint: подсказка о недостающих данных для LLM
 
     Returns:
         {'action': 'respond'|'close'|'warm', 'message': str, 'phone': str|None}
@@ -177,7 +189,9 @@ async def generate_negotiation_response(
         return None
 
     system_prompt = SELLER_SYSTEM_PROMPT if role == "seller" else BUYER_SYSTEM_PROMPT
-    messages = _build_messages(system_prompt, context, product, price)
+    # Никогда не передаём цену покупателю — это внутренняя информация
+    effective_price = price if role == "seller" else None
+    messages = _build_messages(system_prompt, context, product, effective_price, missing_data_hint=missing_data_hint)
 
     try:
         response = await client.chat.completions.create(
@@ -200,6 +214,7 @@ async def generate_initial_message(
     role: str,
     product: str,
     price: Optional[str] = None,
+    missing_data_hint: Optional[str] = None,
 ) -> Optional[str]:
     """
     Generate the first message to a seller or buyer.
@@ -208,6 +223,7 @@ async def generate_initial_message(
         role: 'seller' or 'buyer' — who we are writing TO
         product: product name
         price: product price (optional)
+        missing_data_hint: подсказка о недостающих данных для LLM
 
     Returns:
         Message text or None if LLM is unavailable
@@ -217,15 +233,21 @@ async def generate_initial_message(
         return None
 
     system_prompt = INITIAL_SELLER_SYSTEM_PROMPT if role == "seller" else INITIAL_BUYER_SYSTEM_PROMPT
+    # Никогда не передаём цену покупателю
+    effective_price = price if role == "seller" else None
     product_info = f"Товар: {product}"
-    if price:
-        product_info += f", цена: {price}"
+    if effective_price:
+        product_info += f", цена: {effective_price}"
+
+    system_content = f"{system_prompt}\n\n{product_info}"
+    if missing_data_hint:
+        system_content += f"\n\n{missing_data_hint}"
 
     try:
         response = await client.chat.completions.create(
             model=settings.openai_model,
             messages=[
-                {"role": "system", "content": f"{system_prompt}\n\n{product_info}"},
+                {"role": "system", "content": system_content},
                 {"role": "user", "content": f"Напиши первое сообщение про {product}"},
             ],
             temperature=0.8,

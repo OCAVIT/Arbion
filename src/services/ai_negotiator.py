@@ -69,13 +69,21 @@ FOLLOWUP_POSITIVE_FIRST = [
     "ок, а комплект полный? коробка есть?",
 ]
 
-# Уточнение цены
+# Уточнение цены (для продавца)
 FOLLOWUP_PRICE = [
     "понял, а по цене можно подвинуться немного?",
     "ясно, если скинешь чуть-чуть - сразу заберу",
     "а торг будет? могу подъехать сегодня",
     "а если чуть дешевле - возьму сейчас",
     "по цене договоримся? заберу быстро",
+]
+
+# Уточнение бюджета покупателя (никогда не называем цену!)
+FOLLOWUP_BUYER_PRICE = [
+    "а на какой бюджет рассчитываешь?",
+    "по сумме что-нибудь подойдёт? какой бюджет?",
+    "а на какую сумму смотришь?",
+    "а по бюджету как? сколько готов отдать?",
 ]
 
 # Уточнение состояния (второй этап)
@@ -103,6 +111,29 @@ FOLLOWUP_UNCLEAR = [
     "так актуально или нет?",
     "прости, не понял - в продаже ещё?",
 ]
+
+# Шаблоны для уточнения недостающих данных (fallback)
+MISSING_DATA_TEMPLATES = {
+    "price_seller": [
+        "а сколько просишь?",
+        "а по цене что скажешь?",
+        "а за сколько отдашь?",
+    ],
+    "price_buyer": [
+        "а на какой бюджет рассчитываешь?",
+        "по сумме как? какой бюджет?",
+        "а на какую сумму смотришь?",
+    ],
+    "region": [
+        "а ты откуда? в каком городе?",
+        "а в каком городе?",
+        "а где территориально?",
+    ],
+    "quantity": [
+        "а сколько штук нужно?",
+        "по количеству - сколько?",
+    ],
+}
 
 # Ответ на негатив (прощание)
 GOODBYE_TEMPLATES = [
@@ -182,6 +213,46 @@ _DENIAL_WORD = r'(?:нет[уа]?|не[ату]+|неа)'
 _SHORT_DENIAL_PATTERN = re.compile(
     rf'^[\s]*{_DENIAL_WORD}(?:[\s,.\-!]+{_DENIAL_WORD})?[\s,.\-!]*$', re.IGNORECASE
 )
+
+
+def detect_missing_fields(deal, target: str) -> dict:
+    """
+    Определяет, каких данных не хватает в сделке/заявке.
+
+    Args:
+        deal: DetectedDeal
+        target: 'seller' или 'buyer'
+
+    Returns:
+        {'missing': ['price', 'region', ...], 'prompt_hint': str}
+    """
+    missing = []
+    hints = []
+
+    if target == "seller":
+        order = getattr(deal, 'sell_order', None)
+        if not deal.sell_price and (not order or not order.price):
+            missing.append("price")
+            hints.append("цена не указана — узнай сколько просит за товар")
+        if not deal.region and (not order or not order.region):
+            missing.append("region")
+            hints.append("город не указан — узнай откуда продавец")
+    else:
+        order = getattr(deal, 'buy_order', None)
+        if not deal.buy_price and (not order or not order.price):
+            missing.append("price")
+            hints.append("бюджет не указан — узнай на какую сумму рассчитывает")
+        if not deal.region and (not order or not order.region):
+            missing.append("region")
+            hints.append("город не указан — узнай откуда покупатель")
+
+    prompt_hint = ""
+    if hints:
+        prompt_hint = "ВАЖНО — следующие данные отсутствуют, естественно вплети вопросы в разговор:\n"
+        prompt_hint += "\n".join(f"- {h}" for h in hints)
+        prompt_hint += "\nСпрашивай по одному, не все сразу."
+
+    return {"missing": missing, "prompt_hint": prompt_hint}
 
 
 def analyze_response(text: str, last_ai_message: str = "") -> Tuple[str, Optional[str]]:
@@ -283,10 +354,14 @@ def determine_next_action(
     sentiment: str,
     phone: Optional[str],
     context: List[dict],
-    stage: NegotiationStage
+    stage: NegotiationStage,
+    target: str = "seller",
 ) -> Tuple[str, Optional[str]]:
     """
     Определение следующего действия на основе анализа.
+
+    Args:
+        target: 'seller' или 'buyer' — с кем ведём диалог
 
     Returns:
         Tuple[action, response]:
@@ -303,10 +378,15 @@ def determine_next_action(
     if sentiment == 'negative':
         return 'close', random.choice(GOODBYE_TEMPLATES)
 
+    # Выбираем шаблоны цены в зависимости от target
+    price_templates = FOLLOWUP_BUYER_PRICE if target == "buyer" else FOLLOWUP_PRICE
+
     # Логика в зависимости от количества обменов
     if exchanges == 0:
         # Первый ответ - уточняем состояние
         if sentiment in ['positive', 'price', 'condition']:
+            if target == "buyer" and sentiment == 'price':
+                return 'respond', random.choice(price_templates)
             return 'respond', random.choice(FOLLOWUP_POSITIVE_FIRST)
         elif sentiment == 'contact':
             # Упоминают контакт, но номера нет - просим
@@ -317,7 +397,7 @@ def determine_next_action(
     elif exchanges == 1:
         # Второй обмен - обсуждаем цену или состояние
         if sentiment == 'price':
-            return 'respond', random.choice(FOLLOWUP_PRICE)
+            return 'respond', random.choice(price_templates)
         elif sentiment in ['positive', 'condition']:
             return 'respond', random.choice(FOLLOWUP_CONDITION)
         elif sentiment == 'contact':
@@ -424,9 +504,15 @@ async def initiate_negotiation(deal: DetectedDeal, db: AsyncSession) -> Optional
             f"buyer_sender_id={deal.buyer_sender_id}, buyer_chat_id={deal.buyer_chat_id}"
         )
 
+        # Определяем недостающие данные
+        seller_missing = detect_missing_fields(deal, "seller")
+
         # Генерируем первое сообщение продавцу (LLM → fallback на шаблон)
         price_str = str(deal.sell_price) if deal.sell_price else None
-        seller_message = await llm.generate_initial_message("seller", deal.product, price_str)
+        seller_message = await llm.generate_initial_message(
+            "seller", deal.product, price_str,
+            missing_data_hint=seller_missing["prompt_hint"],
+        )
         if not seller_message:
             seller_message = generate_response('initial_seller', deal.product)
 
@@ -453,7 +539,12 @@ async def initiate_negotiation(deal: DetectedDeal, db: AsyncSession) -> Optional
         buyer_chat_id = deal.buyer_chat_id
 
         if buyer_sender_id or buyer_chat_id:
-            buyer_message = await llm.generate_initial_message("buyer", deal.product, price_str)
+            buyer_missing = detect_missing_fields(deal, "buyer")
+            # НЕ передаём цену продавца покупателю — это убивает маржу
+            buyer_message = await llm.generate_initial_message(
+                "buyer", deal.product, None,
+                missing_data_hint=buyer_missing["prompt_hint"],
+            )
             if not buyer_message:
                 buyer_message = generate_response('initial_buyer', deal.product)
 
@@ -519,12 +610,48 @@ async def process_seller_response(
         context = await get_conversation_context(negotiation, db, MessageTarget.SELLER)
         deal = negotiation.deal
 
+        # Извлекаем данные из ответа продавца (lazy import для избежания circular import)
+        from src.services.message_handler import extract_price, extract_region, extract_quantity
+
+        sell_order = deal.sell_order
+        if not sell_order:
+            result_order = await db.execute(select(Order).where(Order.id == deal.sell_order_id))
+            sell_order = result_order.scalar_one_or_none()
+
+        if not deal.sell_price:
+            extracted_price = extract_price(response_text)
+            if extracted_price:
+                deal.sell_price = extracted_price
+                if sell_order:
+                    sell_order.price = extracted_price
+                if deal.buy_price:
+                    deal.margin = deal.buy_price - extracted_price
+                logger.info(f"Извлечена цена продавца {extracted_price} из ответа")
+
+        if not deal.region:
+            extracted_region = extract_region(response_text)
+            if extracted_region:
+                deal.region = extracted_region
+                if sell_order:
+                    sell_order.region = extracted_region
+                logger.info(f"Извлечён регион '{extracted_region}' из ответа продавца")
+
+        if sell_order and not sell_order.quantity:
+            extracted_qty = extract_quantity(response_text)
+            if extracted_qty:
+                sell_order.quantity = extracted_qty
+                logger.info(f"Извлечено количество '{extracted_qty}' из ответа продавца")
+
+        # Определяем недостающие данные для LLM
+        seller_missing = detect_missing_fields(deal, "seller")
+
         # Пробуем LLM, fallback на шаблоны
         llm_result = await llm.generate_negotiation_response(
             role="seller",
             context=context,
             product=deal.product,
             price=str(deal.sell_price) if deal.sell_price else None,
+            missing_data_hint=seller_missing["prompt_hint"],
         )
 
         if llm_result:
@@ -539,7 +666,7 @@ async def process_seller_response(
                     last_ai_msg = msg['content']
                     break
             sentiment, phone = analyze_response(response_text, last_ai_msg)
-            action, response = determine_next_action(sentiment, phone, context, negotiation.stage)
+            action, response = determine_next_action(sentiment, phone, context, negotiation.stage, target="seller")
 
         # Safety net: regex-проверка на телефон в тексте продавца
         regex_phone = extract_phone_from_text(response_text)
@@ -651,12 +778,48 @@ async def process_buyer_response(
         context = await get_conversation_context(negotiation, db, MessageTarget.BUYER)
         deal = negotiation.deal
 
-        # Пробуем LLM, fallback на шаблоны
+        # Извлекаем данные из ответа покупателя
+        from src.services.message_handler import extract_price, extract_region, extract_quantity
+
+        buy_order = deal.buy_order
+        if not buy_order:
+            result_order = await db.execute(select(Order).where(Order.id == deal.buy_order_id))
+            buy_order = result_order.scalar_one_or_none()
+
+        if not deal.buy_price:
+            extracted_price = extract_price(response_text)
+            if extracted_price:
+                deal.buy_price = extracted_price
+                if buy_order:
+                    buy_order.price = extracted_price
+                if deal.sell_price:
+                    deal.margin = extracted_price - deal.sell_price
+                logger.info(f"Извлечён бюджет покупателя {extracted_price} из ответа")
+
+        if not deal.region:
+            extracted_region = extract_region(response_text)
+            if extracted_region:
+                deal.region = extracted_region
+                if buy_order:
+                    buy_order.region = extracted_region
+                logger.info(f"Извлечён регион '{extracted_region}' из ответа покупателя")
+
+        if buy_order and not buy_order.quantity:
+            extracted_qty = extract_quantity(response_text)
+            if extracted_qty:
+                buy_order.quantity = extracted_qty
+                logger.info(f"Извлечено количество '{extracted_qty}' из ответа покупателя")
+
+        # Определяем недостающие данные для LLM
+        buyer_missing = detect_missing_fields(deal, "buyer")
+
+        # Пробуем LLM, fallback на шаблоны (цена НЕ передаётся покупателю)
         llm_result = await llm.generate_negotiation_response(
             role="buyer",
             context=context,
             product=deal.product,
-            price=str(deal.buy_price) if deal.buy_price else None,
+            price=None,
+            missing_data_hint=buyer_missing["prompt_hint"],
         )
 
         if llm_result:
@@ -670,7 +833,7 @@ async def process_buyer_response(
                     last_ai_msg = msg['content']
                     break
             sentiment, phone = analyze_response(response_text, last_ai_msg)
-            action, response = determine_next_action(sentiment, phone, context, negotiation.stage)
+            action, response = determine_next_action(sentiment, phone, context, negotiation.stage, target="buyer")
 
         # Safety net: regex-проверка на телефон
         regex_phone = extract_phone_from_text(response_text)

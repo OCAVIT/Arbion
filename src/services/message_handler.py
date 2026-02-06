@@ -357,6 +357,25 @@ def extract_region(text: str) -> Optional[str]:
     return None
 
 
+# Quantity patterns
+QUANTITY_PATTERNS = [
+    r'(\d+)\s*(?:шт\.?|штук[иа]?|единиц[аы]?|ед\.?)',
+    r'(?:количество|кол-во|кол\.?)\s*[:\-]?\s*(\d+)',
+]
+
+
+def extract_quantity(text: str) -> Optional[str]:
+    """Извлечение количества из текста. Возвращает строку вида '5 шт' или None."""
+    text_lower = text.lower()
+    for pattern in QUANTITY_PATTERNS:
+        match = re.search(pattern, text_lower)
+        if match:
+            qty = match.group(1) or match.group(2)
+            if qty and int(qty) > 0:
+                return f"{qty} шт"
+    return None
+
+
 async def try_match_orders(db, new_order: Order) -> Optional[DetectedDeal]:
     """
     Try to match a new order with existing opposite orders.
