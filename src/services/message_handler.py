@@ -19,7 +19,8 @@ from sqlalchemy.orm import selectinload
 
 from src.db import get_db_context
 from src.models import (
-    DetectedDeal, DealStatus, Negotiation, NegotiationStage,
+    DetectedDeal, DealStatus, MessageRole, MessageTarget,
+    Negotiation, NegotiationMessage, NegotiationStage,
     Order, OrderType, RawMessage
 )
 from src.services.ai_negotiator import initiate_negotiation, process_seller_response, process_buyer_response
@@ -448,10 +449,33 @@ async def try_match_orders(db, new_order: Order) -> Optional[DetectedDeal]:
     return None
 
 
+def _passive_save_message(db, negotiation, message_text: str, role: MessageRole, target: MessageTarget):
+    """Save incoming message passively (no AI response). Manager sees it in chat."""
+    msg = NegotiationMessage(
+        negotiation_id=negotiation.id,
+        role=role,
+        target=target,
+        content=message_text,
+    )
+    db.add(msg)
+    logger.info(
+        f">>> Passive save: сообщение сохранено для переговоров #{negotiation.id} "
+        f"(stage={negotiation.stage.value}, AI НЕ отвечает)"
+    )
+
+
+# Stages where AI should NOT generate responses (manager took over or deal done)
+_AI_SILENT_STAGES = {NegotiationStage.CLOSED, NegotiationStage.WARM, NegotiationStage.HANDED_TO_MANAGER}
+
+
 async def check_negotiation_response(db, sender_id: int, message_text: str) -> bool:
     """
     Проверка, является ли сообщение ответом на активные переговоры.
     Если да - обрабатывает через AI negotiator.
+
+    For WARM / HANDED_TO_MANAGER / CLOSED negotiations:
+    - Save the message passively (manager sees it in chat)
+    - Do NOT generate AI response
 
     Args:
         db: Database session
@@ -492,6 +516,11 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
                 f">>> НАЙДЕНЫ переговоры #{negotiation.id} для продавца {sender_id} "
                 f"(stage={negotiation.stage.value}, deal_id={negotiation.deal_id})"
             )
+            # If negotiation is in silent stage, save passively
+            if negotiation.stage in _AI_SILENT_STAGES:
+                _passive_save_message(db, negotiation, message_text, MessageRole.SELLER, MessageTarget.SELLER)
+                await db.flush()
+                return True
             success = await process_seller_response(negotiation, message_text, db)
             logger.info(f">>> process_seller_response вернул: {success}")
             return True
@@ -523,6 +552,11 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
                 f">>> НАЙДЕНЫ переговоры #{negotiation.id} для покупателя {sender_id} "
                 f"(stage={negotiation.stage.value}, deal_id={negotiation.deal_id})"
             )
+            # If negotiation is in silent stage, save passively
+            if negotiation.stage in _AI_SILENT_STAGES:
+                _passive_save_message(db, negotiation, message_text, MessageRole.BUYER, MessageTarget.BUYER)
+                await db.flush()
+                return True
             success = await process_buyer_response(negotiation, message_text, db)
             logger.info(f">>> process_buyer_response вернул: {success}")
             return True

@@ -63,6 +63,51 @@
         </div>
     </div>
 
+    <!-- Deal Details Panel -->
+    <div class="card deal-details-card" id="dealDetailsCard" style="margin-top:12px;">
+        <div class="card-header" style="cursor:pointer;" onclick="toggleDealDetails()">
+            <h3>Детали сделки</h3>
+            <span id="dealDetailsToggle" style="font-size:18px;">&#9660;</span>
+        </div>
+        <div class="card-body" id="dealDetailsBody" style="display:none;">
+            <div class="detail-grid">
+                <div class="detail-item">
+                    <span class="detail-label">Регион:</span>
+                    <span class="detail-value" id="detailRegion">-</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Город продавца:</span>
+                    <span class="detail-value" id="detailCity">-</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Состояние:</span>
+                    <span class="detail-value" id="detailCondition">-</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Характеристики:</span>
+                    <span class="detail-value" id="detailSpecs">-</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">AI Insight:</span>
+                    <span class="detail-value" id="detailInsight">-</span>
+                </div>
+            </div>
+            <div style="margin-top:12px;">
+                <label style="display:block;margin-bottom:4px;color:var(--text-secondary);font-size:13px;">Заметки</label>
+                <textarea id="dealNotes" rows="3" style="width:100%;resize:vertical;" placeholder="Заметки по сделке..."></textarea>
+                <button onclick="saveNotes()" class="btn btn-primary btn-sm" style="margin-top:6px;">Сохранить заметки</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Commission Info (for closed WON deals) -->
+    <div class="card" id="commissionCard" style="margin-top:12px;display:none;">
+        <div class="card-body" style="text-align:center;">
+            <div style="color:var(--text-secondary);font-size:13px;">Ваша комиссия по этой сделке</div>
+            <div style="font-size:24px;font-weight:700;color:var(--success);margin-top:4px;" id="dealCommission">-</div>
+        </div>
+    </div>
+
     <!-- Close Actions -->
     <div class="chat-actions" id="chatActions">
         <button onclick="closeDeal('won')" class="btn btn-success">Закрыть (Успех)</button>
@@ -278,6 +323,41 @@
     flex: 1;
 }
 
+/* Deal Details */
+.deal-details-card .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.detail-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.detail-label {
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.detail-value {
+    font-weight: 500;
+    font-size: 14px;
+}
+
+@media (max-width: 480px) {
+    .detail-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* Empty/Loading states */
 .empty, .loading {
     text-align: center;
@@ -393,6 +473,16 @@ async function loadMessages() {
     document.getElementById('dealStatus').textContent = getStatusLabel(data.deal_status);
     document.getElementById('dealStatus').className = `badge badge-${data.deal_status}`;
 
+    // Populate deal details
+    document.getElementById('detailRegion').textContent = data.region || '-';
+    document.getElementById('detailCity').textContent = data.seller_city || '-';
+    document.getElementById('detailCondition').textContent = data.seller_condition || '-';
+    document.getElementById('detailSpecs').textContent = data.seller_specs || '-';
+    document.getElementById('detailInsight').textContent = data.ai_insight || '-';
+    if (data.notes) {
+        document.getElementById('dealNotes').value = data.notes;
+    }
+
     // Check if closed
     if (data.deal_status === 'won' || data.deal_status === 'lost') {
         dealClosed = true;
@@ -400,6 +490,12 @@ async function loadMessages() {
         document.getElementById('buyerInputArea').style.display = 'none';
         document.getElementById('chatActions').style.display = 'none';
         clearInterval(refreshInterval);
+
+        // Show commission for WON deals
+        if (data.deal_status === 'won' && data.commission !== undefined && data.commission !== null) {
+            document.getElementById('commissionCard').style.display = 'block';
+            document.getElementById('dealCommission').textContent = formatMoney(data.commission);
+        }
     }
 
     // Render seller messages
@@ -483,6 +579,32 @@ async function closeDeal(status) {
     } else {
         const data = await response.json();
         alert(data.detail || 'Ошибка');
+    }
+}
+
+function toggleDealDetails() {
+    const body = document.getElementById('dealDetailsBody');
+    const toggle = document.getElementById('dealDetailsToggle');
+    if (body.style.display === 'none') {
+        body.style.display = 'block';
+        toggle.innerHTML = '&#9650;';
+    } else {
+        body.style.display = 'none';
+        toggle.innerHTML = '&#9660;';
+    }
+}
+
+async function saveNotes() {
+    const notes = document.getElementById('dealNotes').value;
+    const res = await fetch(`/panel/chat/${negotiationId}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes })
+    });
+    if (res.ok) {
+        alert('Заметки сохранены');
+    } else {
+        alert('Ошибка сохранения');
     }
 }
 

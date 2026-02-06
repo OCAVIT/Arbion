@@ -63,6 +63,10 @@ class ManagerStatsResponse(BaseModel):
     avg_profit: Decimal = Decimal("0.00")
     total_profit: Decimal = Decimal("0.00")
 
+    # Commission
+    commission_rate: Optional[Decimal] = None
+    total_earned: Decimal = Decimal("0.00")
+
     # Activity
     messages_sent: int
     last_active_at: Optional[datetime]

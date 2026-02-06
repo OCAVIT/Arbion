@@ -26,7 +26,7 @@ def _get_client() -> Optional[AsyncOpenAI]:
 
 SELLER_SYSTEM_PROMPT = """\
 Ты — заинтересованный покупатель б/у техники, ведёшь переписку в Telegram. \
-Твоя задача: узнать состояние товара, обсудить цену и получить номер телефона продавца для созвона.
+Твоя задача: узнать максимум информации о товаре и только после этого получить номер телефона для созвона.
 
 Правила общения:
 - Пиши КОРОТКО, 1-2 предложения максимум, как реальный человек в мессенджере
@@ -36,10 +36,16 @@ SELLER_SYSTEM_PROMPT = """\
 - НЕ представляйся, НЕ называй своё имя
 - НЕ говори что ты бот или ИИ
 
-Стратегия переговоров:
-1. Сначала уточни актуальность и состояние
-2. Затем обсуди цену (попроси скидку если уместно)
-3. В конце попроси номер телефона для созвона
+Стратегия переговоров (СТРОГО по порядку):
+1. Уточни актуальность
+2. Узнай состояние (царапины, дефекты, комплект)
+3. Узнай город продавца
+4. Узнай характеристики (память, цвет, конфигурация)
+5. Обсуди цену (попроси скидку если уместно)
+6. ТОЛЬКО ПОСЛЕ всего вышеперечисленного — попроси номер телефона
+
+ВАЖНО: НЕ проси номер телефона пока не узнал: состояние, город, характеристики. \
+Если чего-то не хватает — спроси сначала об этом.
 
 Ответ строго в JSON (без markdown, без ```):
 {"action": "respond", "message": "текст ответа", "phone": null}
@@ -52,7 +58,7 @@ SELLER_SYSTEM_PROMPT = """\
 
 BUYER_SYSTEM_PROMPT = """\
 Ты — продавец/посредник, нашёл товар по запросу покупателя и пишешь ему в Telegram. \
-Твоя задача: подтвердить интерес покупателя, уточнить детали и получить его контакт для связи.
+Твоя задача: подтвердить интерес, узнать детали и только потом получить контакт.
 
 Правила общения:
 - Пиши КОРОТКО, 1-2 предложения максимум
@@ -64,9 +70,15 @@ BUYER_SYSTEM_PROMPT = """\
 - Если покупатель спрашивает цену — спроси на какой бюджет он рассчитывает
 - Цена — это внутренняя информация, покупатель НЕ должен её знать
 
-Стратегия:
-1. Уточни интерес и детали (какую конфигурацию хочет, бюджет)
-2. Попроси контакт для связи
+Стратегия переговоров (СТРОГО по порядку):
+1. Подтверди интерес покупателя
+2. Узнай предпочтения по конфигурации (память, цвет, комплект)
+3. Узнай город покупателя
+4. Узнай бюджет (на какую сумму рассчитывает)
+5. ТОЛЬКО ПОСЛЕ всего вышеперечисленного — попроси номер телефона
+
+ВАЖНО: НЕ проси номер телефона пока не узнал: город, предпочтения, бюджет. \
+Если чего-то не хватает — спроси сначала об этом.
 
 Ответ строго в JSON (без markdown, без ```):
 {"action": "respond", "message": "текст ответа", "phone": null}
@@ -115,6 +127,8 @@ def _build_messages(
     price: Optional[str] = None,
     role_mapping: Optional[dict] = None,
     missing_data_hint: Optional[str] = None,
+    listing_text: Optional[str] = None,
+    cross_context: Optional[str] = None,
 ) -> list:
     """Build OpenAI messages array from conversation context."""
     if role_mapping is None:
@@ -125,6 +139,13 @@ def _build_messages(
         product_info += f", цена: {price}"
 
     system_content = f"{system_prompt}\n\n{product_info}"
+
+    if listing_text:
+        system_content += f"\n\nОригинальное объявление:\n{listing_text[:500]}"
+
+    if cross_context:
+        system_content += f"\n\n{cross_context}"
+
     if missing_data_hint:
         system_content += f"\n\n{missing_data_hint}"
 
@@ -169,6 +190,8 @@ async def generate_negotiation_response(
     product: str,
     price: Optional[str] = None,
     missing_data_hint: Optional[str] = None,
+    listing_text: Optional[str] = None,
+    cross_context: Optional[str] = None,
 ) -> Optional[dict]:
     """
     Generate a negotiation response using OpenAI.
@@ -179,6 +202,8 @@ async def generate_negotiation_response(
         product: product name
         price: product price (optional)
         missing_data_hint: подсказка о недостающих данных для LLM
+        listing_text: original listing text for context
+        cross_context: info from the other side of the deal
 
     Returns:
         {'action': 'respond'|'close'|'warm', 'message': str, 'phone': str|None}
@@ -191,7 +216,12 @@ async def generate_negotiation_response(
     system_prompt = SELLER_SYSTEM_PROMPT if role == "seller" else BUYER_SYSTEM_PROMPT
     # Никогда не передаём цену покупателю — это внутренняя информация
     effective_price = price if role == "seller" else None
-    messages = _build_messages(system_prompt, context, product, effective_price, missing_data_hint=missing_data_hint)
+    messages = _build_messages(
+        system_prompt, context, product, effective_price,
+        missing_data_hint=missing_data_hint,
+        listing_text=listing_text,
+        cross_context=cross_context,
+    )
 
     try:
         response = await client.chat.completions.create(
@@ -215,6 +245,7 @@ async def generate_initial_message(
     product: str,
     price: Optional[str] = None,
     missing_data_hint: Optional[str] = None,
+    listing_text: Optional[str] = None,
 ) -> Optional[str]:
     """
     Generate the first message to a seller or buyer.
@@ -224,6 +255,7 @@ async def generate_initial_message(
         product: product name
         price: product price (optional)
         missing_data_hint: подсказка о недостающих данных для LLM
+        listing_text: original listing text for context
 
     Returns:
         Message text or None if LLM is unavailable
@@ -240,6 +272,8 @@ async def generate_initial_message(
         product_info += f", цена: {effective_price}"
 
     system_content = f"{system_prompt}\n\n{product_info}"
+    if listing_text:
+        system_content += f"\n\nОригинальное объявление:\n{listing_text[:500]}"
     if missing_data_hint:
         system_content += f"\n\n{missing_data_hint}"
 

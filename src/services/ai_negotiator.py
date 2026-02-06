@@ -104,6 +104,16 @@ FOLLOWUP_ASK_CONTACT = [
     "супер, давай номер телефона чтоб созвониться",
 ]
 
+# Уточнение города и характеристик (exchanges 2-3)
+FOLLOWUP_CITY_OR_SPECS = [
+    "а ты в каком городе?",
+    "а где территориально находишься?",
+    "а какая конфигурация? память, цвет?",
+    "а в каком городе можно забрать?",
+    "а по характеристикам - какая память, комплект?",
+    "а откуда? в каком городе?",
+]
+
 # Уточнение если непонятно
 FOLLOWUP_UNCLEAR = [
     "не совсем понял, так продаёшь ещё?",
@@ -215,13 +225,33 @@ _SHORT_DENIAL_PATTERN = re.compile(
 )
 
 
-def detect_missing_fields(deal, target: str) -> dict:
+def _analyze_discussed_topics(context: List[dict]) -> set:
+    """Scan conversation context for already discussed topics."""
+    discussed = set()
+    all_text = " ".join(m["content"].lower() for m in context)
+
+    condition_markers = ['состояние', 'царапин', 'сколы', 'дефект', 'работает', 'идеал', 'комплект', 'коробка']
+    city_markers = ['город', 'откуда', 'территориально', 'москва', 'мск', 'спб', 'питер', 'екб']
+    specs_markers = ['память', 'конфигурац', 'цвет', 'гб', 'gb', 'процессор', 'версия']
+
+    if any(m in all_text for m in condition_markers):
+        discussed.add("condition")
+    if any(m in all_text for m in city_markers):
+        discussed.add("city")
+    if any(m in all_text for m in specs_markers):
+        discussed.add("specs")
+
+    return discussed
+
+
+def detect_missing_fields(deal, target: str, context: Optional[List[dict]] = None) -> dict:
     """
     Определяет, каких данных не хватает в сделке/заявке.
 
     Args:
         deal: DetectedDeal
         target: 'seller' или 'buyer'
+        context: conversation context for topic analysis
 
     Returns:
         {'missing': ['price', 'region', ...], 'prompt_hint': str}
@@ -229,28 +259,58 @@ def detect_missing_fields(deal, target: str) -> dict:
     missing = []
     hints = []
 
+    discussed = _analyze_discussed_topics(context) if context else set()
+
     if target == "seller":
         order = getattr(deal, 'sell_order', None)
+        # Check condition
+        if not getattr(deal, 'seller_condition', None) and "condition" not in discussed:
+            missing.append("condition")
+            hints.append("состояние не известно — узнай про состояние товара")
+        # Check city
+        if not getattr(deal, 'seller_city', None) and not deal.region and "city" not in discussed:
+            missing.append("city")
+            hints.append("город не указан — узнай откуда продавец")
+        # Check specs
+        if not getattr(deal, 'seller_specs', None) and "specs" not in discussed:
+            missing.append("specs")
+            hints.append("характеристики не известны — узнай конфигурацию (память, цвет)")
+        # Check price
         if not deal.sell_price and (not order or not order.price):
             missing.append("price")
             hints.append("цена не указана — узнай сколько просит за товар")
-        if not deal.region and (not order or not order.region):
-            missing.append("region")
-            hints.append("город не указан — узнай откуда продавец")
     else:
         order = getattr(deal, 'buy_order', None)
+        # Check city
+        if not deal.region and "city" not in discussed:
+            missing.append("city")
+            hints.append("город не указан — узнай откуда покупатель")
+        # Check price/budget
         if not deal.buy_price and (not order or not order.price):
             missing.append("price")
             hints.append("бюджет не указан — узнай на какую сумму рассчитывает")
-        if not deal.region and (not order or not order.region):
-            missing.append("region")
-            hints.append("город не указан — узнай откуда покупатель")
+
+    # If we still have missing fields, tell LLM NOT to ask for phone yet
+    phone_block = ""
+    if missing:
+        missing_labels = []
+        if "condition" in missing:
+            missing_labels.append("состояние")
+        if "city" in missing:
+            missing_labels.append("город")
+        if "specs" in missing:
+            missing_labels.append("характеристики")
+        if "price" in missing:
+            missing_labels.append("цену" if target == "seller" else "бюджет")
+        if missing_labels:
+            phone_block = f"\nОБЯЗАТЕЛЬНО — НЕ ПРОСИ ТЕЛЕФОН пока не узнал: {', '.join(missing_labels)}."
 
     prompt_hint = ""
     if hints:
         prompt_hint = "ВАЖНО — следующие данные отсутствуют, естественно вплети вопросы в разговор:\n"
         prompt_hint += "\n".join(f"- {h}" for h in hints)
         prompt_hint += "\nСпрашивай по одному, не все сразу."
+        prompt_hint += phone_block
 
     return {"missing": missing, "prompt_hint": prompt_hint}
 
@@ -405,10 +465,18 @@ def determine_next_action(
         else:
             return 'respond', random.choice(FOLLOWUP_UNCLEAR)
 
-    elif exchanges >= 2:
-        # Третий+ обмен - пора просить контакт
+    elif exchanges in [2, 3]:
+        # Exchanges 2-3: ask city/specs, NOT phone yet
         if sentiment == 'contact':
-            # Упоминают контакт но номера нет - уточняем
+            return 'respond', random.choice(FOLLOWUP_ASK_CONTACT)
+        elif sentiment in ['positive', 'price', 'condition']:
+            return 'respond', random.choice(FOLLOWUP_CITY_OR_SPECS)
+        else:
+            return 'respond', random.choice(FOLLOWUP_CITY_OR_SPECS)
+
+    elif exchanges >= 4:
+        # Exchanges 4+: now can ask for phone
+        if sentiment == 'contact':
             return 'respond', "скинь номер телефона - созвонимся"
         elif sentiment in ['positive', 'price', 'condition']:
             return 'respond', random.choice(FOLLOWUP_ASK_CONTACT)
@@ -450,6 +518,67 @@ def generate_response(stage: str, product: str, context: str = "") -> str:
 
     else:
         return "Подскажите подробнее, пожалуйста."
+
+
+# =====================================================
+# КРОСС-КОНТЕКСТ
+# =====================================================
+
+async def build_cross_context(deal: DetectedDeal, current_target: str, db: AsyncSession) -> Optional[str]:
+    """
+    Build cross-context info from the other side of the deal.
+
+    For buyer: condition, city, specs from seller (NEVER price!)
+    For seller: buyer budget, region
+    """
+    parts = []
+
+    if current_target == "buyer":
+        # Give buyer info about what seller said (but NEVER the price)
+        if deal.seller_condition:
+            parts.append(f"Состояние товара (от продавца): {deal.seller_condition}")
+        if deal.seller_city:
+            parts.append(f"Город продавца: {deal.seller_city}")
+        if deal.seller_specs:
+            parts.append(f"Характеристики: {deal.seller_specs}")
+    elif current_target == "seller":
+        # Give seller info about buyer preferences
+        if deal.buy_price:
+            parts.append(f"Бюджет покупателя: {deal.buy_price}")
+        if deal.region:
+            parts.append(f"Регион покупателя: {deal.region}")
+
+    if not parts:
+        return None
+
+    return "Информация с другой стороны сделки (используй для контекста, НЕ раскрывай напрямую):\n" + "\n".join(f"- {p}" for p in parts)
+
+
+def _extract_condition_from_text(text: str) -> Optional[str]:
+    """Try to extract condition info from seller response."""
+    text_lower = text.lower()
+    condition_markers = [
+        'идеальн', 'отличн', 'хорош', 'норм', 'без царапин', 'без сколов',
+        'как новый', 'без дефектов', 'без косяков', 'состояние',
+        'царапин', 'потёртост', 'потертост', 'скол', 'трещин',
+    ]
+    if any(m in text_lower for m in condition_markers):
+        # Return a shortened version
+        return text[:200].strip()
+    return None
+
+
+def _extract_specs_from_text(text: str) -> Optional[str]:
+    """Try to extract specs (memory, color, config) from text."""
+    text_lower = text.lower()
+    specs_markers = [
+        'гб', 'gb', 'тб', 'tb', 'память', 'озу', 'ram',
+        'чёрный', 'черный', 'белый', 'серый', 'синий', 'красный', 'золотой',
+        'pro max', 'pro', 'plus', 'ultra',
+    ]
+    if any(m in text_lower for m in specs_markers):
+        return text[:200].strip()
+    return None
 
 
 # =====================================================
@@ -505,11 +634,15 @@ async def initiate_negotiation(deal: DetectedDeal, db: AsyncSession) -> Optional
         # Определяем недостающие данные
         seller_missing = detect_missing_fields(deal, "seller")
 
+        # Get listing text for context
+        seller_listing_text = sell_order.raw_text if sell_order else None
+
         # Генерируем первое сообщение продавцу (LLM → fallback на шаблон)
         price_str = str(deal.sell_price) if deal.sell_price else None
         seller_message = await llm.generate_initial_message(
             "seller", deal.product, price_str,
             missing_data_hint=seller_missing["prompt_hint"],
+            listing_text=seller_listing_text,
         )
         if not seller_message:
             seller_message = generate_response('initial_seller', deal.product)
@@ -538,10 +671,15 @@ async def initiate_negotiation(deal: DetectedDeal, db: AsyncSession) -> Optional
 
         if buyer_sender_id or buyer_chat_id:
             buyer_missing = detect_missing_fields(deal, "buyer")
+            # Get buy order listing text
+            buy_order_result = await db.execute(select(Order).where(Order.id == deal.buy_order_id))
+            buy_order = buy_order_result.scalar_one_or_none()
+            buyer_listing_text = buy_order.raw_text if buy_order else None
             # НЕ передаём цену продавца покупателю — это убивает маржу
             buyer_message = await llm.generate_initial_message(
                 "buyer", deal.product, None,
                 missing_data_hint=buyer_missing["prompt_hint"],
+                listing_text=buyer_listing_text,
             )
             if not buyer_message:
                 buyer_message = generate_response('initial_buyer', deal.product)
@@ -638,8 +776,35 @@ async def process_seller_response(
                 sell_order.quantity = extracted_qty
                 logger.info(f"Извлечено количество '{extracted_qty}' из ответа продавца")
 
+        # Extract condition, city, specs from seller response
+        if not deal.seller_condition:
+            extracted_condition = _extract_condition_from_text(response_text)
+            if extracted_condition:
+                deal.seller_condition = extracted_condition
+                logger.info(f"Извлечено состояние: '{extracted_condition[:50]}...'")
+
+        if not deal.seller_city:
+            extracted_city = extract_region(response_text)
+            if extracted_city:
+                deal.seller_city = extracted_city
+                if not deal.region:
+                    deal.region = extracted_city
+                    if sell_order:
+                        sell_order.region = extracted_city
+                logger.info(f"Извлечён город продавца: '{extracted_city}'")
+
+        if not deal.seller_specs:
+            extracted_specs = _extract_specs_from_text(response_text)
+            if extracted_specs:
+                deal.seller_specs = extracted_specs
+                logger.info(f"Извлечены спеки: '{extracted_specs[:50]}...'")
+
         # Определяем недостающие данные для LLM
-        seller_missing = detect_missing_fields(deal, "seller")
+        seller_missing = detect_missing_fields(deal, "seller", context=context)
+
+        # Get listing text and cross-context
+        listing_text = sell_order.raw_text if sell_order else None
+        cross_ctx = await build_cross_context(deal, "seller", db)
 
         # Пробуем LLM, fallback на шаблоны
         llm_result = await llm.generate_negotiation_response(
@@ -648,6 +813,8 @@ async def process_seller_response(
             product=deal.product,
             price=str(deal.sell_price) if deal.sell_price else None,
             missing_data_hint=seller_missing["prompt_hint"],
+            listing_text=listing_text,
+            cross_context=cross_ctx,
         )
 
         if llm_result:
@@ -676,6 +843,8 @@ async def process_seller_response(
             deal.status = DealStatus.WARM
             deal.ai_insight = f"Продавец заинтересован. Получен контакт: {phone or 'упомянут'}. Последнее сообщение: {response_text[:100]}"
             negotiation.stage = NegotiationStage.WARM
+            if phone:
+                deal.seller_phone = phone
             await db.flush()
             logger.info(f">>> Сделка {deal.id} стала WARM!")
             return True
@@ -805,7 +974,11 @@ async def process_buyer_response(
                 logger.info(f"Извлечено количество '{extracted_qty}' из ответа покупателя")
 
         # Определяем недостающие данные для LLM
-        buyer_missing = detect_missing_fields(deal, "buyer")
+        buyer_missing = detect_missing_fields(deal, "buyer", context=context)
+
+        # Get listing text and cross-context
+        listing_text = buy_order.raw_text if buy_order else None
+        cross_ctx = await build_cross_context(deal, "buyer", db)
 
         # Пробуем LLM, fallback на шаблоны (цена НЕ передаётся покупателю)
         llm_result = await llm.generate_negotiation_response(
@@ -814,6 +987,8 @@ async def process_buyer_response(
             product=deal.product,
             price=None,
             missing_data_hint=buyer_missing["prompt_hint"],
+            listing_text=listing_text,
+            cross_context=cross_ctx,
         )
 
         if llm_result:
@@ -839,6 +1014,7 @@ async def process_buyer_response(
 
         if action == 'warm' and phone:
             deal.ai_insight = (deal.ai_insight or "") + f"\nПокупатель дал контакт: {phone}"
+            deal.buyer_phone = phone
             await db.flush()
             logger.info(f">>> Сделка {deal.id}: покупатель дал номер!")
             return True

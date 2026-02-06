@@ -48,6 +48,46 @@
         </div>
     </div>
 
+    <!-- Deal Details -->
+    <div class="card deal-details-card">
+        <div class="card-header">
+            <h3>Детали сделки</h3>
+            <button onclick="saveDealDetails()" class="btn btn-primary btn-sm">Сохранить</button>
+        </div>
+        <div class="card-body">
+            <div class="info-grid">
+                <div class="info-item">
+                    <label>Целевая цена продажи</label>
+                    <input type="number" id="targetSellPrice" placeholder="0" step="100">
+                </div>
+                <div class="info-item">
+                    <label>Город продавца</label>
+                    <span id="sellerCity">-</span>
+                </div>
+                <div class="info-item">
+                    <label>Состояние</label>
+                    <span id="sellerCondition">-</span>
+                </div>
+                <div class="info-item">
+                    <label>Характеристики</label>
+                    <span id="sellerSpecs">-</span>
+                </div>
+                <div class="info-item">
+                    <label>Телефон продавца</label>
+                    <span id="sellerPhone">-</span>
+                </div>
+                <div class="info-item">
+                    <label>Телефон покупателя</label>
+                    <span id="buyerPhone">-</span>
+                </div>
+            </div>
+            <div style="margin-top: 12px;">
+                <label style="display:block;margin-bottom:6px;color:var(--text-secondary);font-size:12px;">Заметки</label>
+                <textarea id="dealNotes" rows="3" placeholder="Заметки к сделке..." style="width:100%;resize:vertical;"></textarea>
+            </div>
+        </div>
+    </div>
+
     <!-- Actions -->
     <div class="card actions-card">
         <div class="card-header">
@@ -460,6 +500,34 @@ async function loadDeal() {
     document.getElementById('dealProfit').textContent = deal.profit ? formatMoney(deal.profit) : '-';
     document.getElementById('dealManager').textContent = deal.manager_name || 'Не назначен';
     document.getElementById('dealInsight').textContent = deal.ai_insight || '-';
+
+    // Deal details
+    document.getElementById('sellerCity').textContent = deal.seller_city || '-';
+    document.getElementById('sellerCondition').textContent = deal.seller_condition || '-';
+    document.getElementById('sellerSpecs').textContent = deal.seller_specs || '-';
+    document.getElementById('sellerPhone').textContent = deal.seller_phone || '-';
+    document.getElementById('buyerPhone').textContent = deal.buyer_phone || '-';
+    if (deal.target_sell_price) document.getElementById('targetSellPrice').value = deal.target_sell_price;
+    if (deal.notes) document.getElementById('dealNotes').value = deal.notes;
+}
+
+async function saveDealDetails() {
+    const data = {};
+    const targetPrice = document.getElementById('targetSellPrice').value;
+    const notes = document.getElementById('dealNotes').value;
+    if (targetPrice) data.target_sell_price = parseFloat(targetPrice);
+    if (notes !== undefined) data.notes = notes;
+
+    const res = await fetch(`/admin/deals/${dealId}/update`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+    if (res.ok) {
+        loadDeal();
+    } else {
+        alert('Ошибка при сохранении');
+    }
 }
 
 async function loadMessages() {

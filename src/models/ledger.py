@@ -4,7 +4,7 @@ Ledger model for financial tracking.
 
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import DateTime, ForeignKey, Numeric, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -54,6 +54,12 @@ class LedgerEntry(Base, TimestampMixin):
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
+    )
+
+    manager_commission: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(12, 2),
+        nullable=True,
+        comment="Commission paid to the closing manager",
     )
 
     # Relationships

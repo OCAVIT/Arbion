@@ -47,6 +47,12 @@ async function loadDeals() {
                     <button onclick="copyContact('${escapeHtml(deal.seller_contact)}')" class="btn btn-sm btn-outline copy-btn" title="Копировать">📋</button>
                 </div>
             ` : ''}
+            ${deal.status === 'won' && deal.commission ? `
+                <div class="deal-commission">
+                    <span class="commission-label">Комиссия:</span>
+                    <span class="commission-value text-success">${formatMoney(deal.commission)}</span>
+                </div>
+            ` : ''}
             <div class="deal-meta">
                 <span>Сообщений: ${deal.messages_count}</span>
             </div>

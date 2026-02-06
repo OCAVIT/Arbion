@@ -17,6 +17,10 @@
         <div class="metric-title">Конверсия</div>
         <div class="metric-value" id="conversionRate">-</div>
     </div>
+    <div class="metric-card" title="Сумма вашей комиссии по закрытым сделкам">
+        <div class="metric-title">Заработано</div>
+        <div class="metric-value text-success" id="totalEarned">-</div>
+    </div>
     <div class="metric-card metric-card-accent" title="Тёплые лиды, доступные для взятия в работу">
         <div class="metric-title">Доступно в пуле</div>
         <div class="metric-value" id="warmPool">-</div>
@@ -72,6 +76,9 @@ async function loadStats() {
         document.getElementById('closedMonth').textContent = data.closed_this_month;
         document.getElementById('conversionRate').textContent = data.conversion_rate + '%';
         document.getElementById('warmPool').textContent = data.warm_leads_in_pool;
+        if (data.total_earned !== undefined) {
+            document.getElementById('totalEarned').textContent = formatMoney(data.total_earned);
+        }
     } catch (error) {
         console.error('Error loading stats:', error);
     }

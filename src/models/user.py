@@ -4,10 +4,11 @@ User model for authentication and role management.
 
 import secrets
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import Boolean, DateTime, Numeric, String
 from sqlalchemy import Enum as SQLAlchemyEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -70,6 +71,15 @@ class User(Base, TimestampMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+    # Commission rate for managers (fraction, e.g. 0.10 = 10%)
+    commission_rate: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(5, 4),
+        nullable=True,
+        default=Decimal("0.10"),
+        server_default="0.10",
+        comment="Manager commission rate as fraction of margin",
+    )
+
     # Unique invite token for manager login links
     invite_token: Mapped[Optional[str]] = mapped_column(
         String(64),

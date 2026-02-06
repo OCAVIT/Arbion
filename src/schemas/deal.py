@@ -17,6 +17,20 @@ from src.models.negotiation import MessageRole, MessageTarget
 from src.utils.masking import generate_contact_ref, mask_sensitive
 
 
+class DealUpdateRequest(BaseModel):
+    """Request to update deal parameters (owner only)."""
+
+    sell_price: Optional[Decimal] = None
+    buy_price: Optional[Decimal] = None
+    target_sell_price: Optional[Decimal] = None
+    margin: Optional[Decimal] = None
+    notes: Optional[str] = Field(None, max_length=2000)
+    region: Optional[str] = Field(None, max_length=100)
+    seller_condition: Optional[str] = Field(None, max_length=500)
+    seller_city: Optional[str] = Field(None, max_length=100)
+    seller_specs: Optional[str] = Field(None, max_length=500)
+
+
 class OwnerDealResponse(BaseModel):
     """
     Full deal information for owner.
@@ -54,6 +68,15 @@ class OwnerDealResponse(BaseModel):
     # AI insights
     ai_insight: Optional[str]
     ai_resolution: Optional[str]
+
+    # Deal details
+    notes: Optional[str] = None
+    target_sell_price: Optional[Decimal] = None
+    seller_condition: Optional[str] = None
+    seller_city: Optional[str] = None
+    seller_specs: Optional[str] = None
+    seller_phone: Optional[str] = None
+    buyer_phone: Optional[str] = None
 
     # Negotiation info
     negotiation_id: Optional[int]
@@ -114,6 +137,9 @@ class ManagerDealResponse(BaseModel):
     can_take: bool = True
     take_blocked_reason: Optional[str] = None
 
+    # Commission (only for closed WON deals)
+    commission: Optional[Decimal] = None
+
     model_config = {"from_attributes": True}
 
     @classmethod
@@ -125,6 +151,7 @@ class ManagerDealResponse(BaseModel):
         can_take: bool = True,
         take_blocked_reason: Optional[str] = None,
         seller_contact: Optional[str] = None,
+        commission: Optional[Decimal] = None,
     ) -> "ManagerDealResponse":
         """
         Create manager response from deal model.
@@ -165,6 +192,7 @@ class ManagerDealResponse(BaseModel):
             messages_count=messages_count,
             can_take=can_take,
             take_blocked_reason=take_blocked_reason,
+            commission=commission,
         )
 
 

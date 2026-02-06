@@ -36,7 +36,23 @@
                     <div class="stat-value text-success" id="totalProfit">-</div>
                     <div class="stat-label">Общий профит</div>
                 </div>
+                <div class="stat-card">
+                    <div class="stat-value text-success" id="totalEarned">-</div>
+                    <div class="stat-label">Заработано</div>
+                </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Commission -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Комиссия</h3>
+        </div>
+        <div class="card-body" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+            <label>Ставка комиссии (%)</label>
+            <input type="number" id="commissionRate" step="1" min="0" max="100" style="width:100px;">
+            <button onclick="saveCommission()" class="btn btn-primary btn-sm">Сохранить</button>
         </div>
     </div>
 
@@ -82,6 +98,18 @@ async function loadManagerStats() {
     document.getElementById('lostDeals').textContent = data.lost_deals;
     document.getElementById('conversionRate').textContent = data.conversion_rate + '%';
     document.getElementById('totalProfit').textContent = formatMoney(data.total_profit);
+    document.getElementById('totalEarned').textContent = formatMoney(data.total_earned);
+    if (data.commission_rate !== null && data.commission_rate !== undefined) {
+        document.getElementById('commissionRate').value = Math.round(data.commission_rate * 100);
+    }
+}
+
+async function saveCommission() {
+    const pct = parseFloat(document.getElementById('commissionRate').value);
+    if (isNaN(pct) || pct < 0 || pct > 100) { alert('Введите число от 0 до 100'); return; }
+    const rate = pct / 100;
+    const res = await fetch(`/admin/managers/${managerId}/commission?commission_rate=${rate}`, { method: 'PATCH' });
+    if (res.ok) { loadManagerStats(); } else { alert('Ошибка сохранения'); }
 }
 
 async function loadAuditLog() {

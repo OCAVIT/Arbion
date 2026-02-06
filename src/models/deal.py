@@ -120,6 +120,43 @@ class DetectedDeal(Base, TimestampMixin):
         comment="AI explanation of deal outcome",
     )
 
+    # Deal details (gathered during negotiation)
+    notes: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Owner/manager notes about the deal",
+    )
+    target_sell_price: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(12, 2),
+        nullable=True,
+        comment="Target resale price set by owner",
+    )
+    seller_condition: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="Product condition reported by seller",
+    )
+    seller_city: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Seller city extracted from negotiation",
+    )
+    seller_specs: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="Product specs from seller (config, memory, etc.)",
+    )
+    seller_phone: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Seller phone number",
+    )
+    buyer_phone: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Buyer phone number",
+    )
+
     # Buyer info (OWNER ONLY - never expose to managers)
     buyer_chat_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,

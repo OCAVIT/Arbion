@@ -82,6 +82,7 @@ class ManagerPanelStatsResponse(BaseModel):
     closed_this_month: int
     conversion_rate: float
     warm_leads_in_pool: int
+    total_earned: Decimal = Decimal("0.00")
 
 
 class LedgerEntryResponse(BaseModel):

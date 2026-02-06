@@ -1,11 +1,13 @@
 """Manager panel chat API endpoints."""
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -26,6 +28,11 @@ from src.models import (
     User,
 )
 from src.schemas.deal import DealCloseRequest, MessageResponse, SendMessageRequest
+
+
+class NotesRequest(BaseModel):
+    """Request to update deal notes."""
+    notes: str = Field(..., max_length=2000)
 from src.utils.audit import get_client_ip, log_action
 
 router = APIRouter(prefix="/chat")
@@ -145,6 +152,21 @@ async def get_messages(
         for msg in messages
     ]
 
+    deal = negotiation.deal
+
+    # Common deal details for manager
+    deal_details = {
+        "deal_status": deal.status.value,
+        "product": deal.product,
+        "sell_price": str(deal.sell_price),
+        "region": deal.region,
+        "seller_condition": deal.seller_condition,
+        "seller_city": deal.seller_city,
+        "seller_specs": deal.seller_specs,
+        "notes": deal.notes,
+        "ai_insight": deal.ai_insight,
+    }
+
     # If no target filter, return separated lists
     if not target:
         seller_messages = [m for m in all_messages if m.target == "seller"]
@@ -153,16 +175,12 @@ async def get_messages(
             "messages": all_messages,
             "seller_messages": seller_messages,
             "buyer_messages": buyer_messages,
-            "deal_status": negotiation.deal.status.value,
-            "product": negotiation.deal.product,
-            "sell_price": str(negotiation.deal.sell_price),
+            **deal_details,
         }
 
     return {
         "messages": all_messages,
-        "deal_status": negotiation.deal.status.value,
-        "product": negotiation.deal.product,
-        "sell_price": str(negotiation.deal.sell_price),
+        **deal_details,
     }
 
 
@@ -264,6 +282,44 @@ async def send_message(
     }
 
 
+@router.post("/{negotiation_id}/notes")
+async def update_notes(
+    request: Request,
+    negotiation_id: int,
+    data: NotesRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_manager),
+):
+    """Update deal notes (manager)."""
+    result = await db.execute(
+        select(Negotiation)
+        .options(selectinload(Negotiation.deal))
+        .where(Negotiation.id == negotiation_id)
+    )
+    negotiation = result.scalar_one_or_none()
+
+    if not negotiation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Переговоры не найдены")
+
+    if negotiation.deal.manager_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="У вас нет доступа к этой сделке")
+
+    negotiation.deal.notes = data.notes
+
+    await log_action(
+        db=db,
+        user_id=current_user.id,
+        action=AuditAction.UPDATE_DEAL,
+        target_type="deal",
+        target_id=negotiation.deal.id,
+        action_metadata={"action": "update_notes"},
+        ip_address=get_client_ip(request),
+    )
+
+    await db.commit()
+    return {"success": True}
+
+
 @router.post("/{negotiation_id}/close")
 async def close_deal(
     request: Request,
@@ -321,12 +377,19 @@ async def close_deal(
         profit = deal.margin
         deal.profit = profit
 
+        # Calculate manager commission
+        manager_commission = Decimal("0")
+        manager = await db.get(User, current_user.id)
+        if manager and manager.commission_rate:
+            manager_commission = deal.margin * manager.commission_rate
+
         ledger = LedgerEntry(
             deal_id=deal.id,
             buy_amount=deal.buy_price,
             sell_amount=deal.sell_price,
             profit=profit,
             closed_by_user_id=current_user.id,
+            manager_commission=manager_commission,
         )
         db.add(ledger)
 

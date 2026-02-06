@@ -1,6 +1,7 @@
 """Manager panel dashboard API endpoints."""
 
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
@@ -10,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import require_manager
 from src.db import get_db
-from src.models import DealStatus, DetectedDeal, SystemSetting, User, UserRole
+from src.models import DealStatus, DetectedDeal, LedgerEntry, SystemSetting, User, UserRole
 from src.schemas.dashboard import ManagerPanelStatsResponse
 
 router = APIRouter()
@@ -87,11 +88,20 @@ async def get_panel_stats(
             )
         )
 
+    # Total earned from commissions
+    total_earned = await db.scalar(
+        select(func.sum(LedgerEntry.manager_commission))
+        .select_from(LedgerEntry)
+        .join(DetectedDeal)
+        .where(DetectedDeal.manager_id == current_user.id)
+    )
+
     return ManagerPanelStatsResponse(
         active_deals=active_deals or 0,
         closed_this_month=total_closed,
         conversion_rate=round(conversion, 1),
         warm_leads_in_pool=warm_in_pool or 0,
+        total_earned=total_earned or Decimal("0.00"),
     )
 
 

@@ -1,6 +1,7 @@
 """Admin deals API endpoints."""
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -30,6 +31,7 @@ from src.schemas.deal import (
     DealAssignRequest,
     DealCloseRequest,
     DealListResponse,
+    DealUpdateRequest,
     MessageResponse,
     OwnerDealResponse,
     SendMessageRequest,
@@ -121,6 +123,13 @@ async def list_deals(
             seller_contact=deal.sell_order.contact_info if deal.sell_order else None,
             ai_insight=deal.ai_insight,
             ai_resolution=deal.ai_resolution,
+            notes=deal.notes,
+            target_sell_price=deal.target_sell_price,
+            seller_condition=deal.seller_condition,
+            seller_city=deal.seller_city,
+            seller_specs=deal.seller_specs,
+            seller_phone=deal.seller_phone,
+            buyer_phone=deal.buyer_phone,
             negotiation_id=deal.negotiation.id if deal.negotiation else None,
             negotiation_stage=deal.negotiation.stage.value if deal.negotiation else None,
             messages_count=msg_count or 0,
@@ -188,6 +197,13 @@ async def get_deal(
         seller_contact=deal.sell_order.contact_info if deal.sell_order else None,
         ai_insight=deal.ai_insight,
         ai_resolution=deal.ai_resolution,
+        notes=deal.notes,
+        target_sell_price=deal.target_sell_price,
+        seller_condition=deal.seller_condition,
+        seller_city=deal.seller_city,
+        seller_specs=deal.seller_specs,
+        seller_phone=deal.seller_phone,
+        buyer_phone=deal.buyer_phone,
         negotiation_id=deal.negotiation.id if deal.negotiation else None,
         negotiation_stage=deal.negotiation.stage.value if deal.negotiation else None,
         messages_count=msg_count or 0,
@@ -376,6 +392,60 @@ async def send_message(
     return {"success": True, "message_id": message.id, "target": data.target}
 
 
+@router.patch("/{deal_id}/update")
+async def update_deal(
+    request: Request,
+    deal_id: int,
+    data: DealUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_owner),
+):
+    """Update deal parameters (owner only). Auto-recalculates margin."""
+    deal = await db.get(DetectedDeal, deal_id)
+    if not deal:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Deal not found",
+        )
+
+    if data.sell_price is not None:
+        deal.sell_price = data.sell_price
+    if data.buy_price is not None:
+        deal.buy_price = data.buy_price
+    if data.target_sell_price is not None:
+        deal.target_sell_price = data.target_sell_price
+    if data.notes is not None:
+        deal.notes = data.notes
+    if data.region is not None:
+        deal.region = data.region
+    if data.seller_condition is not None:
+        deal.seller_condition = data.seller_condition
+    if data.seller_city is not None:
+        deal.seller_city = data.seller_city
+    if data.seller_specs is not None:
+        deal.seller_specs = data.seller_specs
+
+    # Auto-recalculate margin if prices changed
+    if data.margin is not None:
+        deal.margin = data.margin
+    elif data.sell_price is not None or data.buy_price is not None:
+        if deal.buy_price and deal.sell_price:
+            deal.margin = deal.buy_price - deal.sell_price
+
+    await log_action(
+        db=db,
+        user_id=current_user.id,
+        action=AuditAction.UPDATE_DEAL,
+        target_type="deal",
+        target_id=deal_id,
+        action_metadata=data.model_dump(exclude_none=True),
+        ip_address=get_client_ip(request),
+    )
+
+    await db.commit()
+    return {"success": True}
+
+
 @router.post("/{deal_id}/close")
 async def close_deal(
     request: Request,
@@ -401,12 +471,20 @@ async def close_deal(
         profit = deal.margin  # Or calculate actual profit
         deal.profit = profit
 
+        # Calculate manager commission
+        manager_commission = Decimal("0")
+        if deal.manager_id:
+            manager = await db.get(User, deal.manager_id)
+            if manager and manager.commission_rate:
+                manager_commission = deal.margin * manager.commission_rate
+
         ledger = LedgerEntry(
             deal_id=deal.id,
             buy_amount=deal.buy_price,
             sell_amount=deal.sell_price,
             profit=profit,
             closed_by_user_id=current_user.id,
+            manager_commission=manager_commission,
         )
         db.add(ledger)
 

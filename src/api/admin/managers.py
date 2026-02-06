@@ -234,6 +234,14 @@ async def get_manager_stats(
         .where(NegotiationMessage.sent_by_user_id == manager.id)
     )
 
+    # Total earned (sum of manager_commission from ledger)
+    total_earned = await db.scalar(
+        select(func.sum(LedgerEntry.manager_commission))
+        .select_from(LedgerEntry)
+        .join(DetectedDeal)
+        .where(DetectedDeal.manager_id == manager.id)
+    )
+
     return ManagerStatsResponse(
         id=manager.id,
         display_name=manager.display_name,
@@ -245,9 +253,50 @@ async def get_manager_stats(
         avg_close_time_hours=None,  # TODO: Calculate from deal timestamps
         avg_profit=profits.avg or Decimal("0.00"),
         total_profit=profits.total or Decimal("0.00"),
+        commission_rate=manager.commission_rate,
+        total_earned=total_earned or Decimal("0.00"),
         messages_sent=messages_count or 0,
         last_active_at=manager.last_active_at,
     )
+
+
+@router.patch("/{manager_id}/commission")
+async def update_commission_rate(
+    request: Request,
+    manager_id: int,
+    commission_rate: float,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_owner),
+):
+    """Set commission rate for a manager."""
+    manager = await db.get(User, manager_id)
+
+    if not manager or manager.role != UserRole.MANAGER:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Manager not found",
+        )
+
+    if commission_rate < 0 or commission_rate > 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Commission rate must be between 0 and 1",
+        )
+
+    manager.commission_rate = Decimal(str(commission_rate))
+
+    await log_action(
+        db=db,
+        user_id=current_user.id,
+        action=AuditAction.UPDATE_MANAGER,
+        target_type="user",
+        target_id=manager_id,
+        action_metadata={"commission_rate": commission_rate},
+        ip_address=get_client_ip(request),
+    )
+
+    await db.commit()
+    return {"success": True, "commission_rate": float(manager.commission_rate)}
 
 
 @router.get("/{manager_id}/audit")
