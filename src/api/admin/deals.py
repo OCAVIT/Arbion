@@ -21,6 +21,7 @@ from src.models import (
     MessageTarget,
     Negotiation,
     NegotiationMessage,
+    Order,
     OutboxMessage,
     User,
     UserRole,
@@ -418,6 +419,76 @@ async def close_deal(
         action_metadata={"status": data.status, "resolution": data.resolution},
         ip_address=get_client_ip(request),
     )
+
+    await db.commit()
+    return {"success": True}
+
+
+@router.delete("/{deal_id}")
+async def delete_deal(
+    request: Request,
+    deal_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_owner),
+):
+    """Delete a deal and all related data (negotiations, messages, outbox)."""
+    deal = await db.get(DetectedDeal, deal_id)
+    if not deal:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Deal not found",
+        )
+
+    # Удаляем связанные данные в правильном порядке (FK constraints)
+    negotiation_result = await db.execute(
+        select(Negotiation).where(Negotiation.deal_id == deal_id)
+    )
+    negotiation = negotiation_result.scalar_one_or_none()
+
+    if negotiation:
+        # 1. Outbox messages
+        await db.execute(
+            OutboxMessage.__table__.delete().where(
+                OutboxMessage.negotiation_id == negotiation.id
+            )
+        )
+        # 2. Negotiation messages
+        await db.execute(
+            NegotiationMessage.__table__.delete().where(
+                NegotiationMessage.negotiation_id == negotiation.id
+            )
+        )
+        # 3. Negotiation
+        await db.delete(negotiation)
+
+    # 4. Деактивируем связанные заказы
+    if deal.buy_order_id:
+        buy_order = await db.get(Order, deal.buy_order_id)
+        if buy_order:
+            buy_order.is_active = False
+    if deal.sell_order_id:
+        sell_order = await db.get(Order, deal.sell_order_id)
+        if sell_order:
+            sell_order.is_active = False
+
+    # 5. Ledger entries
+    await db.execute(
+        LedgerEntry.__table__.delete().where(LedgerEntry.deal_id == deal_id)
+    )
+
+    # 6. Логируем до удаления (пока deal.product доступен)
+    await log_action(
+        db=db,
+        user_id=current_user.id,
+        action=AuditAction.DELETE_DEAL,
+        target_type="deal",
+        target_id=deal_id,
+        action_metadata={"product": deal.product},
+        ip_address=get_client_ip(request),
+    )
+
+    # 6. Удаляем сделку
+    await db.delete(deal)
 
     await db.commit()
     return {"success": True}

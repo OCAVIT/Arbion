@@ -61,6 +61,7 @@
                 <button onclick="assignManager()" class="btn btn-primary">Назначить</button>
                 <button onclick="closeDeal('won')" class="btn btn-success">Закрыть (Выигрыш)</button>
                 <button onclick="closeDeal('lost')" class="btn btn-danger">Закрыть (Проигрыш)</button>
+                <button onclick="deleteDeal()" class="btn btn-danger" style="margin-left:auto">Удалить</button>
             </div>
         </div>
     </div>
@@ -559,6 +560,17 @@ async function closeDeal(status) {
         body: JSON.stringify({ status, resolution })
     });
     loadDeal();
+}
+
+async function deleteDeal() {
+    if (!confirm('Удалить сделку и все связанные переговоры? Это действие необратимо.')) return;
+
+    const res = await fetch(`/admin/deals/${dealId}`, { method: 'DELETE' });
+    if (res.ok) {
+        window.location.href = '/admin/deals';
+    } else {
+        alert('Ошибка при удалении сделки');
+    }
 }
 
 function switchChat(chat) {

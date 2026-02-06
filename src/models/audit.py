@@ -24,6 +24,7 @@ class AuditAction(str, Enum):
     SEND_MESSAGE = "send_message"
     TAKE_DEAL = "take_deal"
     CLOSE_DEAL = "close_deal"
+    DELETE_DEAL = "delete_deal"
     UPDATE_DEAL = "update_deal"
     CREATE_MANAGER = "create_manager"
     UPDATE_MANAGER = "update_manager"
