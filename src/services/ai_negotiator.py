@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from typing import Optional, List, Tuple
 
 from sqlalchemy import select
+
+from src.services import llm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -422,8 +424,11 @@ async def initiate_negotiation(deal: DetectedDeal, db: AsyncSession) -> Optional
             f"buyer_sender_id={deal.buyer_sender_id}, buyer_chat_id={deal.buyer_chat_id}"
         )
 
-        # Генерируем первое сообщение продавцу
-        seller_message = generate_response('initial_seller', deal.product)
+        # Генерируем первое сообщение продавцу (LLM → fallback на шаблон)
+        price_str = str(deal.sell_price) if deal.sell_price else None
+        seller_message = await llm.generate_initial_message("seller", deal.product, price_str)
+        if not seller_message:
+            seller_message = generate_response('initial_seller', deal.product)
 
         # Сохраняем в историю (чат с продавцом)
         msg = NegotiationMessage(
@@ -448,7 +453,9 @@ async def initiate_negotiation(deal: DetectedDeal, db: AsyncSession) -> Optional
         buyer_chat_id = deal.buyer_chat_id
 
         if buyer_sender_id or buyer_chat_id:
-            buyer_message = generate_response('initial_buyer', deal.product)
+            buyer_message = await llm.generate_initial_message("buyer", deal.product, price_str)
+            if not buyer_message:
+                buyer_message = generate_response('initial_buyer', deal.product)
 
             # Сохраняем в историю (чат с покупателем)
             buyer_msg = NegotiationMessage(
@@ -510,41 +517,51 @@ async def process_seller_response(
 
         # Получаем контекст разговора
         context = await get_conversation_context(negotiation, db, MessageTarget.SELLER)
-
-        # Находим последнее сообщение бота для контекстного анализа
-        last_ai_msg = ""
-        for msg in reversed(context):
-            if msg['role'] == 'ai':
-                last_ai_msg = msg['content']
-                break
-
-        # Анализируем ответ с учётом контекста
-        sentiment, phone = analyze_response(response_text, last_ai_msg)
-        logger.info(f"Переговоры {negotiation.id}: sentiment={sentiment}, phone={phone}")
-
         deal = negotiation.deal
 
-        # Определяем следующее действие
-        action, response = determine_next_action(sentiment, phone, context, negotiation.stage)
+        # Пробуем LLM, fallback на шаблоны
+        llm_result = await llm.generate_negotiation_response(
+            role="seller",
+            context=context,
+            product=deal.product,
+            price=str(deal.sell_price) if deal.sell_price else None,
+        )
 
-        logger.info(f"Переговоры {negotiation.id}: action={action}, response='{response[:30] if response else None}...'")
+        if llm_result:
+            action = llm_result["action"]
+            response = llm_result["message"]
+            phone = llm_result.get("phone")
+        else:
+            # Fallback на старую логику
+            last_ai_msg = ""
+            for msg in reversed(context):
+                if msg['role'] == 'ai':
+                    last_ai_msg = msg['content']
+                    break
+            sentiment, phone = analyze_response(response_text, last_ai_msg)
+            action, response = determine_next_action(sentiment, phone, context, negotiation.stage)
+
+        # Safety net: regex-проверка на телефон в тексте продавца
+        regex_phone = extract_phone_from_text(response_text)
+        if regex_phone and action != 'warm':
+            action = 'warm'
+            phone = regex_phone
+
+        logger.info(f"Переговоры {negotiation.id}: action={action}, response='{(response or '')[:30]}...', phone={phone}")
 
         if action == 'warm':
-            # Сделка тёплая - получили номер телефона!
             deal.status = DealStatus.WARM
             deal.ai_insight = f"Продавец заинтересован. Получен контакт: {phone or 'упомянут'}. Последнее сообщение: {response_text[:100]}"
             negotiation.stage = NegotiationStage.WARM
             await db.flush()
-            logger.info(f">>> Сделка {deal.id} стала WARM - получен номер телефона!")
+            logger.info(f">>> Сделка {deal.id} стала WARM!")
             return True
 
         elif action == 'close':
-            # Продавец не заинтересован
             deal.status = DealStatus.LOST
             deal.ai_resolution = f"Продавец отказал: {response_text[:100]}"
             negotiation.stage = NegotiationStage.CLOSED
 
-            # Отправляем прощальное сообщение
             if response:
                 goodbye_msg = NegotiationMessage(
                     negotiation_id=negotiation.id,
@@ -567,7 +584,6 @@ async def process_seller_response(
             return True
 
         elif action == 'respond' and response:
-            # Продолжаем диалог
             ai_msg = NegotiationMessage(
                 negotiation_id=negotiation.id,
                 role=MessageRole.AI,
@@ -575,7 +591,6 @@ async def process_seller_response(
                 content=response,
             )
             db.add(ai_msg)
-            logger.info(f">>> Создано AI сообщение для продавца: '{response[:30]}...'")
 
             outbox = OutboxMessage(
                 recipient_id=negotiation.seller_sender_id or negotiation.seller_chat_id,
@@ -584,25 +599,20 @@ async def process_seller_response(
                 negotiation_id=negotiation.id,
             )
             db.add(outbox)
-            logger.info(f">>> Создано outbox сообщение для recipient_id={negotiation.seller_sender_id or negotiation.seller_chat_id}")
 
-            # Обновляем стадию переговоров
             if negotiation.stage == NegotiationStage.INITIAL:
                 negotiation.stage = NegotiationStage.CONTACTED
             elif negotiation.stage == NegotiationStage.CONTACTED:
                 negotiation.stage = NegotiationStage.NEGOTIATING
 
-            # Обновляем ai_insight
             exchanges = count_exchanges(context)
             deal.ai_insight = f"В диалоге. Обменов: {exchanges + 1}. Последний ответ: {response_text[:50]}"
 
             await db.flush()
-            logger.info(f">>> Переговоры {negotiation.id}: follow-up добавлен в outbox: '{response}'")
+            logger.info(f">>> Переговоры {negotiation.id}: follow-up: '{response}'")
             return True
 
-        # Если ничего не подошло - просто сохраняем
         await db.flush()
-        logger.info(f">>> Переговоры {negotiation.id}: сообщение сохранено без ответа AI")
         return True
 
     except Exception as e:
@@ -639,33 +649,44 @@ async def process_buyer_response(
 
         # Получаем контекст разговора с покупателем
         context = await get_conversation_context(negotiation, db, MessageTarget.BUYER)
-
-        # Находим последнее сообщение бота для контекстного анализа
-        last_ai_msg = ""
-        for msg in reversed(context):
-            if msg['role'] == 'ai':
-                last_ai_msg = msg['content']
-                break
-
-        # Анализируем ответ с учётом контекста
-        sentiment, phone = analyze_response(response_text, last_ai_msg)
-        logger.info(f"Переговоры {negotiation.id} (покупатель): sentiment={sentiment}, phone={phone}")
-
         deal = negotiation.deal
 
-        # Определяем следующее действие
-        action, response = determine_next_action(sentiment, phone, context, negotiation.stage)
-        logger.info(f"Переговоры {negotiation.id} (покупатель): action={action}, response='{response[:30] if response else None}...'")
+        # Пробуем LLM, fallback на шаблоны
+        llm_result = await llm.generate_negotiation_response(
+            role="buyer",
+            context=context,
+            product=deal.product,
+            price=str(deal.buy_price) if deal.buy_price else None,
+        )
+
+        if llm_result:
+            action = llm_result["action"]
+            response = llm_result["message"]
+            phone = llm_result.get("phone")
+        else:
+            last_ai_msg = ""
+            for msg in reversed(context):
+                if msg['role'] == 'ai':
+                    last_ai_msg = msg['content']
+                    break
+            sentiment, phone = analyze_response(response_text, last_ai_msg)
+            action, response = determine_next_action(sentiment, phone, context, negotiation.stage)
+
+        # Safety net: regex-проверка на телефон
+        regex_phone = extract_phone_from_text(response_text)
+        if regex_phone and action != 'warm':
+            action = 'warm'
+            phone = regex_phone
+
+        logger.info(f"Переговоры {negotiation.id} (покупатель): action={action}, response='{(response or '')[:30]}...', phone={phone}")
 
         if action == 'warm' and phone:
-            # Покупатель дал номер - отмечаем
             deal.ai_insight = (deal.ai_insight or "") + f"\nПокупатель дал контакт: {phone}"
             await db.flush()
             logger.info(f">>> Сделка {deal.id}: покупатель дал номер!")
             return True
 
         elif action == 'close':
-            # Покупатель отказался
             deal.ai_insight = (deal.ai_insight or "") + f"\nПокупатель отказался: {response_text[:50]}"
 
             if response:
@@ -690,7 +711,6 @@ async def process_buyer_response(
             return True
 
         elif action == 'respond' and response:
-            # Продолжаем диалог с покупателем
             ai_msg = NegotiationMessage(
                 negotiation_id=negotiation.id,
                 role=MessageRole.AI,
@@ -698,7 +718,6 @@ async def process_buyer_response(
                 content=response,
             )
             db.add(ai_msg)
-            logger.info(f">>> Создано AI сообщение для покупателя: '{response[:30]}...'")
 
             outbox = OutboxMessage(
                 recipient_id=deal.buyer_sender_id or deal.buyer_chat_id,
@@ -707,19 +726,15 @@ async def process_buyer_response(
                 negotiation_id=negotiation.id,
             )
             db.add(outbox)
-            logger.info(f">>> Создано outbox сообщение для buyer_id={deal.buyer_sender_id or deal.buyer_chat_id}")
 
-            # Обновляем ai_insight
             deal.ai_insight = (deal.ai_insight or "") + f"\nПокупатель: {response_text[:30]}"
 
             await db.flush()
-            logger.info(f">>> Переговоры {negotiation.id}: follow-up покупателю добавлен в outbox: '{response}'")
+            logger.info(f">>> Переговоры {negotiation.id}: follow-up покупателю: '{response}'")
             return True
 
-        # Просто сохраняем
         deal.ai_insight = (deal.ai_insight or "") + f"\nПокупатель: {response_text[:50]}"
         await db.flush()
-        logger.info(f">>> Переговоры {negotiation.id}: сообщение покупателя сохранено без ответа AI")
         return True
 
     except Exception as e:

@@ -77,6 +77,10 @@ class Settings(BaseSettings):
         default="",
         description="OpenAI API key"
     )
+    openai_model: str = Field(
+        default="gpt-4o",
+        description="OpenAI model for negotiations"
+    )
 
     # Pinecone
     pinecone_api_key: str = Field(
