@@ -1,6 +1,6 @@
 """Add deal details fields and manager commission
 
-Revision ID: 008_add_deal_details_and_commission
+Revision ID: 008_deal_details_commission
 Revises: 007_add_delete_deal_audit
 Create Date: 2026-02-06
 
@@ -12,7 +12,7 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision: str = "008_add_deal_details_and_commission"
+revision: str = "008_deal_details_commission"
 down_revision: Union[str, None] = "007_add_delete_deal_audit"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
