@@ -447,7 +447,18 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
         return False
 
     try:
-        logger.info(f"Проверяем переговоры для sender_id={sender_id}, текст: '{message_text[:30]}...'")
+        logger.info(f">>> check_negotiation_response: sender_id={sender_id}, текст: '{message_text[:50]}...'")
+
+        # Сначала получим ВСЕ переговоры для диагностики
+        all_negotiations = await db.execute(
+            select(Negotiation).options(selectinload(Negotiation.deal))
+        )
+        all_negs = all_negotiations.scalars().all()
+
+        logger.info(
+            f">>> Всего переговоров в БД: {len(all_negs)}. "
+            f"IDs: {[(n.id, n.seller_sender_id, n.stage.value) for n in all_negs[:5]]}"
+        )
 
         # Проверяем, является ли это ответом ПРОДАВЦА
         seller_query = (
@@ -468,13 +479,14 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
 
         if negotiation:
             logger.info(
-                f"Найдены активные переговоры #{negotiation.id} для продавца {sender_id} "
+                f">>> НАЙДЕНЫ переговоры #{negotiation.id} для продавца {sender_id} "
                 f"(stage={negotiation.stage.value}, deal_id={negotiation.deal_id})"
             )
-            await process_seller_response(negotiation, message_text, db)
+            success = await process_seller_response(negotiation, message_text, db)
+            logger.info(f">>> process_seller_response вернул: {success}")
             return True
 
-        logger.info(f"Переговоры для продавца sender_id={sender_id} не найдены, проверяем покупателя...")
+        logger.info(f">>> Переговоры для продавца sender_id={sender_id} НЕ найдены, проверяем покупателя...")
 
         # Проверяем, является ли это ответом ПОКУПАТЕЛЯ
         buyer_query = (
@@ -496,10 +508,11 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
 
         if negotiation:
             logger.info(
-                f"Найдены активные переговоры #{negotiation.id} для покупателя {sender_id} "
+                f">>> НАЙДЕНЫ переговоры #{negotiation.id} для покупателя {sender_id} "
                 f"(stage={negotiation.stage.value}, deal_id={negotiation.deal_id})"
             )
-            await process_buyer_response(negotiation, message_text, db)
+            success = await process_buyer_response(negotiation, message_text, db)
+            logger.info(f">>> process_buyer_response вернул: {success}")
             return True
 
         # Диагностика: проверим сколько активных переговоров вообще есть
@@ -521,17 +534,32 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
         )
         seller_negotiations = all_for_seller.scalars().all()
 
-        logger.info(
-            f"Переговоры для sender_id={sender_id} НЕ НАЙДЕНЫ. "
-            f"Всего активных переговоров в БД: {active_count}. "
-            f"Переговоров с этим seller_id (любой stage): {len(seller_negotiations)} "
-            f"[stages: {[n.stage.value for n in seller_negotiations]}]"
+        # Проверим также покупателя без фильтра stage
+        all_for_buyer = await db.execute(
+            select(Negotiation)
+            .join(DetectedDeal, Negotiation.deal_id == DetectedDeal.id)
+            .where(
+                or_(
+                    DetectedDeal.buyer_sender_id == sender_id,
+                    DetectedDeal.buyer_chat_id == sender_id,
+                )
+            )
+        )
+        buyer_negotiations = all_for_buyer.scalars().all()
+
+        logger.warning(
+            f">>> Переговоры для sender_id={sender_id} НЕ НАЙДЕНЫ! "
+            f"Активных переговоров: {active_count}. "
+            f"С этим seller_id (любой stage): {len(seller_negotiations)} "
+            f"[stages: {[n.stage.value for n in seller_negotiations]}]. "
+            f"С этим buyer_id (любой stage): {len(buyer_negotiations)} "
+            f"[stages: {[n.stage.value for n in buyer_negotiations]}]"
         )
         return False
 
     except Exception as e:
         # Если ошибка с enum или БД - логируем ERROR и возвращаем False
-        logger.error(f"Ошибка при проверке переговоров для sender_id={sender_id}: {e}", exc_info=True)
+        logger.error(f"!!! ОШИБКА при проверке переговоров для sender_id={sender_id}: {e}", exc_info=True)
         return False
 
 
@@ -583,12 +611,18 @@ async def handle_new_message(event, telegram_service) -> None:
                 index_elements=['chat_id', 'message_id']
             )
             await db.execute(stmt)
-            logger.info(f"Raw message сохранено, проверяем переговоры для sender_id={sender_id}")
+            logger.info(f">>> Raw message сохранено, sender_id={sender_id}")
 
             # ВАЖНО: Сначала проверяем, является ли сообщение ответом на активные переговоры
             # Это критично, т.к. ответ "да, продаю" содержит ключевое слово и иначе
             # обработается как новая заявка вместо ответа на переговоры
-            is_negotiation_response = await check_negotiation_response(db, sender_id, raw_text)
+            is_negotiation_response = False
+            try:
+                is_negotiation_response = await check_negotiation_response(db, sender_id, raw_text)
+                logger.info(f">>> check_negotiation_response вернул: {is_negotiation_response}")
+            except Exception as neg_check_error:
+                logger.error(f"!!! Ошибка в check_negotiation_response: {neg_check_error}", exc_info=True)
+                # Продолжаем обработку как обычное сообщение
 
             if not is_negotiation_response:
                 # Если это не ответ на переговоры - проверяем, является ли это новой заявкой
@@ -658,6 +692,7 @@ async def handle_new_message(event, telegram_service) -> None:
                 raw_msg.processed = True
 
             await db.commit()
+            logger.info(f">>> Транзакция закоммичена успешно для сообщения от sender_id={sender_id}")
 
     except Exception as e:
         logger.error(f"Error handling message: {e}", exc_info=True)

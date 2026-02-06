@@ -82,7 +82,8 @@ async def list_orders(
     items = []
     for order in orders:
         resp = OrderResponse.model_validate(order)
-        resp.chat_title = chat_titles.get(order.chat_id)
+        # Используем chat_title из MonitoredChat, или contact_info для личных чатов
+        resp.chat_title = chat_titles.get(order.chat_id) or order.contact_info or f"ID: {order.sender_id}"
         items.append(resp)
 
     return OrderListResponse(
