@@ -86,6 +86,11 @@ class TelegramService:
         @self.client.on(events.NewMessage)
         async def wrapper(event):
             try:
+                # Mark incoming message as read
+                try:
+                    await event.message.mark_read()
+                except Exception:
+                    pass
                 await handler(event, self)
             except Exception as e:
                 logger.error(f"Message handler error: {e}")
@@ -117,6 +122,11 @@ class TelegramService:
                     await asyncio.sleep(typing_delay)
 
             await self.client.send_message(entity, text)
+            # Mark their messages as read so it shows "read" in Telegram
+            try:
+                await self.client.send_read_acknowledge(entity)
+            except Exception:
+                pass  # Non-critical, don't fail the send
             logger.info(f"Message sent to {recipient_id}")
             return True
         except ValueError:

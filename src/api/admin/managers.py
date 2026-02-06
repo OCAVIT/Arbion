@@ -338,7 +338,7 @@ async def get_manager_audit(
                 "action": log.action.value,
                 "target_type": log.target_type,
                 "target_id": log.target_id,
-                "metadata": log.metadata,
+                "metadata": log.action_metadata,
                 "ip_address": log.ip_address,
                 "created_at": log.created_at,
             }
