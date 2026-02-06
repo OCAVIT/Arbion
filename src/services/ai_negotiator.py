@@ -86,12 +86,12 @@ FOLLOWUP_BUYER_PRICE = [
     "а по бюджету как? сколько готов отдать?",
 ]
 
-# Уточнение состояния (второй этап)
+# Уточнение состояния (второй этап) — универсальные
 FOLLOWUP_CONDITION = [
-    "понял, а аккумулятор как держит?",
-    "ясно, а экран без трещин? битых пикселей нет?",
-    "хорошо, а всё работает? камера, звук?",
-    "ок, а зарядка родная? кабель есть?",
+    "понял, а состояние какое? всё в порядке?",
+    "ясно, а по качеству как? нюансы есть?",
+    "хорошо, а всё работает? дефектов нет?",
+    "ок, а ещё какие-нибудь нюансы есть?",
 ]
 
 # Запрос контакта (финальный этап)
@@ -104,13 +104,13 @@ FOLLOWUP_ASK_CONTACT = [
     "супер, давай номер телефона чтоб созвониться",
 ]
 
-# Уточнение города и характеристик (exchanges 2-3)
+# Уточнение города и характеристик (exchanges 2-3) — универсальные
 FOLLOWUP_CITY_OR_SPECS = [
     "а ты в каком городе?",
     "а где территориально находишься?",
-    "а какая конфигурация? память, цвет?",
+    "а какие основные характеристики?",
     "а в каком городе можно забрать?",
-    "а по характеристикам - какая память, комплект?",
+    "а по параметрам - что можешь сказать?",
     "а откуда? в каком городе?",
 ]
 
@@ -230,9 +230,21 @@ def _analyze_discussed_topics(context: List[dict]) -> set:
     discussed = set()
     all_text = " ".join(m["content"].lower() for m in context)
 
-    condition_markers = ['состояние', 'царапин', 'сколы', 'дефект', 'работает', 'идеал', 'комплект', 'коробка']
-    city_markers = ['город', 'откуда', 'территориально', 'москва', 'мск', 'спб', 'питер', 'екб']
-    specs_markers = ['память', 'конфигурац', 'цвет', 'гб', 'gb', 'процессор', 'версия']
+    condition_markers = [
+        'состояние', 'царапин', 'сколы', 'дефект', 'работает', 'идеал', 'комплект', 'коробка',
+        'износ', 'повреждени', 'исправн', 'качество', 'целост',
+    ]
+    city_markers = [
+        'город', 'откуда', 'территориально', 'москва', 'мск', 'спб', 'питер', 'екб',
+        'расположен', 'регион', 'находи',
+    ]
+    specs_markers = [
+        'память', 'конфигурац', 'цвет', 'гб', 'gb', 'процессор', 'версия',
+        'параметр', 'размер', 'марка', 'модель', 'тип', 'сорт',
+    ]
+    preferences_markers = [
+        'предпочтен', 'интересует', 'какой именно', 'что ищешь', 'что нужно',
+    ]
 
     if any(m in all_text for m in condition_markers):
         discussed.add("condition")
@@ -240,6 +252,8 @@ def _analyze_discussed_topics(context: List[dict]) -> set:
         discussed.add("city")
     if any(m in all_text for m in specs_markers):
         discussed.add("specs")
+    if any(m in all_text for m in preferences_markers):
+        discussed.add("preferences")
 
     return discussed
 
@@ -281,6 +295,10 @@ def detect_missing_fields(deal, target: str, context: Optional[List[dict]] = Non
             hints.append("цена не указана — узнай сколько просит за товар")
     else:
         order = getattr(deal, 'buy_order', None)
+        # Check preferences
+        if not getattr(deal, 'buyer_preferences', None) and "specs" not in discussed and "preferences" not in discussed:
+            missing.append("preferences")
+            hints.append("предпочтения не известны — узнай что именно интересует")
         # Check city
         if not deal.region and "city" not in discussed:
             missing.append("city")
@@ -300,6 +318,8 @@ def detect_missing_fields(deal, target: str, context: Optional[List[dict]] = Non
             missing_labels.append("город")
         if "specs" in missing:
             missing_labels.append("характеристики")
+        if "preferences" in missing:
+            missing_labels.append("предпочтения")
         if "price" in missing:
             missing_labels.append("цену" if target == "seller" else "бюджет")
         if missing_labels:
@@ -561,9 +581,9 @@ def _extract_condition_from_text(text: str) -> Optional[str]:
         'идеальн', 'отличн', 'хорош', 'норм', 'без царапин', 'без сколов',
         'как новый', 'без дефектов', 'без косяков', 'состояние',
         'царапин', 'потёртост', 'потертост', 'скол', 'трещин',
+        'качество', 'износ', 'повреждени', 'целый',
     ]
     if any(m in text_lower for m in condition_markers):
-        # Return a shortened version
         return text[:200].strip()
     return None
 
@@ -575,10 +595,76 @@ def _extract_specs_from_text(text: str) -> Optional[str]:
         'гб', 'gb', 'тб', 'tb', 'память', 'озу', 'ram',
         'чёрный', 'черный', 'белый', 'серый', 'синий', 'красный', 'золотой',
         'pro max', 'pro', 'plus', 'ultra',
+        'размер', 'марка', 'модель', 'тип', 'материал', 'мощность',
     ]
     if any(m in text_lower for m in specs_markers):
         return text[:200].strip()
     return None
+
+
+def _extract_preferences_from_text(text: str) -> Optional[str]:
+    """Try to extract buyer preferences from text."""
+    text_lower = text.lower()
+    pref_markers = [
+        'цвет', 'размер', 'модель', 'тип', 'сорт', 'гб', 'gb',
+        'память', 'конфигурац', 'комплект', 'версия', 'марка',
+        'чёрный', 'черный', 'белый', 'серый', 'синий', 'красный', 'золотой',
+        'pro', 'plus', 'max', 'ultra', 'mini',
+        'материал', 'мощность',
+    ]
+    if any(m in text_lower for m in pref_markers):
+        return text[:200].strip()
+    return None
+
+
+def collect_known_data(deal, target: str, context: Optional[List[dict]] = None) -> dict:
+    """
+    Collect already-known data about the deal for dynamic prompts.
+
+    Args:
+        deal: DetectedDeal
+        target: 'seller' or 'buyer'
+        context: conversation history for scanning
+
+    Returns:
+        dict with known fields: region, condition, specs, price, preferences, budget
+    """
+    known = {}
+
+    if target == "seller":
+        if getattr(deal, 'seller_city', None):
+            known["region"] = deal.seller_city
+        elif deal.region:
+            known["region"] = deal.region
+        if getattr(deal, 'seller_condition', None):
+            known["condition"] = deal.seller_condition[:100]
+        if getattr(deal, 'seller_specs', None):
+            known["specs"] = deal.seller_specs[:100]
+        if deal.sell_price:
+            known["price"] = str(deal.sell_price)
+    else:
+        if deal.region:
+            known["region"] = deal.region
+        if getattr(deal, 'buyer_preferences', None):
+            known["preferences"] = deal.buyer_preferences[:100]
+        if deal.buy_price:
+            known["budget"] = str(deal.buy_price)
+
+    # Scan context for discussed topics that may contain data
+    if context:
+        discussed = _analyze_discussed_topics(context)
+        # If city was discussed but not stored, mark it as known to avoid re-asking
+        if "city" in discussed and "region" not in known:
+            # Try to extract from context
+            for msg in context:
+                if msg["role"] != "ai":
+                    from src.services.message_handler import extract_region
+                    region = extract_region(msg["content"])
+                    if region:
+                        known["region"] = region
+                        break
+
+    return known
 
 
 # =====================================================
@@ -799,7 +885,8 @@ async def process_seller_response(
                 deal.seller_specs = extracted_specs
                 logger.info(f"Извлечены спеки: '{extracted_specs[:50]}...'")
 
-        # Определяем недостающие данные для LLM
+        # Collect known data and determine missing fields
+        known_data = collect_known_data(deal, "seller", context=context)
         seller_missing = detect_missing_fields(deal, "seller", context=context)
 
         # Get listing text and cross-context
@@ -815,6 +902,8 @@ async def process_seller_response(
             missing_data_hint=seller_missing["prompt_hint"],
             listing_text=listing_text,
             cross_context=cross_ctx,
+            known_data=known_data,
+            missing_fields=seller_missing["missing"],
         )
 
         if llm_result:
@@ -973,7 +1062,15 @@ async def process_buyer_response(
                 buy_order.quantity = extracted_qty
                 logger.info(f"Извлечено количество '{extracted_qty}' из ответа покупателя")
 
-        # Определяем недостающие данные для LLM
+        # Extract buyer preferences
+        if not getattr(deal, 'buyer_preferences', None):
+            extracted_prefs = _extract_preferences_from_text(response_text)
+            if extracted_prefs:
+                deal.buyer_preferences = extracted_prefs
+                logger.info(f"Извлечены предпочтения покупателя: '{extracted_prefs[:50]}...'")
+
+        # Collect known data and determine missing fields
+        known_data = collect_known_data(deal, "buyer", context=context)
         buyer_missing = detect_missing_fields(deal, "buyer", context=context)
 
         # Get listing text and cross-context
@@ -989,6 +1086,8 @@ async def process_buyer_response(
             missing_data_hint=buyer_missing["prompt_hint"],
             listing_text=listing_text,
             cross_context=cross_ctx,
+            known_data=known_data,
+            missing_fields=buyer_missing["missing"],
         )
 
         if llm_result:

@@ -156,6 +156,11 @@ class DetectedDeal(Base, TimestampMixin):
         nullable=True,
         comment="Buyer phone number",
     )
+    buyer_preferences: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="Buyer preferences (color, size, config, etc.)",
+    )
 
     # Buyer info (OWNER ONLY - never expose to managers)
     buyer_chat_id: Mapped[Optional[int]] = mapped_column(

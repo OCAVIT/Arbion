@@ -377,6 +377,58 @@ def extract_quantity(text: str) -> Optional[str]:
     return None
 
 
+# Stop-words for product matching (common short words to ignore)
+_PRODUCT_STOP_WORDS = {
+    'в', 'на', 'за', 'по', 'от', 'до', 'из', 'и', 'или', 'с', 'у', 'к',
+    'б', 'бу', 'б/у', 'шт', 'штук', 'срочно', 'продам', 'куплю', 'отдам',
+    'ищу', 'нужен', 'нужна', 'нужно', 'есть', 'новый', 'новая', 'новое',
+}
+
+# Grade/code pattern: single letter + digits (e.g. "м500", "а100") — not product names
+_GRADE_CODE = re.compile(r'^[a-zа-яё]\d{2,}$', re.IGNORECASE)
+
+
+def _products_match(product_a: str, product_b: str) -> bool:
+    """
+    Universal product matching based on significant word overlap.
+
+    Returns True if:
+    - 40%+ of significant words from the shorter set overlap, OR
+    - both contain the same keyword of length >= 4 chars
+    Grade/spec codes (e.g. "М500") are excluded from matching.
+    """
+    if not product_a or not product_b:
+        return False
+
+    a_lower = product_a.lower()
+    b_lower = product_b.lower()
+
+    # Tokenize, filter stop words and grade codes
+    words_a = {
+        w for w in re.split(r'[\s/\-,]+', a_lower)
+        if w and w not in _PRODUCT_STOP_WORDS and len(w) >= 2 and not _GRADE_CODE.match(w)
+    }
+    words_b = {
+        w for w in re.split(r'[\s/\-,]+', b_lower)
+        if w and w not in _PRODUCT_STOP_WORDS and len(w) >= 2 and not _GRADE_CODE.match(w)
+    }
+
+    if not words_a or not words_b:
+        return False
+
+    # Check if any common keyword >= 4 chars exists
+    common = words_a & words_b
+    if any(len(w) >= 4 for w in common):
+        return True
+
+    # Check percentage overlap against shorter set
+    shorter = min(len(words_a), len(words_b))
+    if shorter > 0 and len(common) / shorter >= 0.4:
+        return True
+
+    return False
+
+
 async def try_match_orders(db, new_order: Order) -> Optional[DetectedDeal]:
     """
     Try to match a new order with existing opposite orders.
@@ -384,9 +436,7 @@ async def try_match_orders(db, new_order: Order) -> Optional[DetectedDeal]:
     """
     opposite_type = OrderType.SELL if new_order.order_type == OrderType.BUY else OrderType.BUY
 
-    # Find matching orders by product similarity
-    # Simple approach: exact product match or similar
-    product_lower = new_order.product.lower() if new_order.product else ""
+    product_name = new_order.product or ""
 
     # Get active opposite orders
     result = await db.execute(
@@ -401,50 +451,43 @@ async def try_match_orders(db, new_order: Order) -> Optional[DetectedDeal]:
     candidates = result.scalars().all()
 
     for candidate in candidates:
-        candidate_product = (candidate.product or "").lower()
+        candidate_product = candidate.product or ""
 
-        # Check if products match (simple substring match for now)
-        # In production, use embeddings/vector similarity
-        if product_lower and candidate_product:
-            # Check for common product keywords
-            keywords = ['iphone', 'samsung', 'macbook', 'ipad', 'airpods', 'playstation', 'xbox']
-            for kw in keywords:
-                if kw in product_lower and kw in candidate_product:
-                    # Found a match!
-                    buy_order = new_order if new_order.order_type == OrderType.BUY else candidate
-                    sell_order = candidate if new_order.order_type == OrderType.BUY else new_order
+        if _products_match(product_name, candidate_product):
+            buy_order = new_order if new_order.order_type == OrderType.BUY else candidate
+            sell_order = candidate if new_order.order_type == OrderType.BUY else new_order
 
-                    # Calculate prices and margin
-                    buy_price = buy_order.price or Decimal('0')
-                    sell_price = sell_order.price or Decimal('0')
-                    margin = buy_price - sell_price if buy_price and sell_price else Decimal('0')
+            # Calculate prices and margin
+            buy_price = buy_order.price or Decimal('0')
+            sell_price = sell_order.price or Decimal('0')
+            margin = buy_price - sell_price if buy_price and sell_price else Decimal('0')
 
-                    # Create deal
-                    deal = DetectedDeal(
-                        buy_order_id=buy_order.id,
-                        sell_order_id=sell_order.id,
-                        product=buy_order.product or sell_order.product or "Товар",
-                        region=buy_order.region or sell_order.region,
-                        buy_price=buy_price,
-                        sell_price=sell_price,
-                        margin=margin,
-                        status=DealStatus.COLD,
-                        buyer_chat_id=buy_order.chat_id,
-                        buyer_sender_id=buy_order.sender_id,
-                    )
-                    db.add(deal)
-                    await db.flush()  # Get deal ID and ensure it's persisted
+            # Create deal
+            deal = DetectedDeal(
+                buy_order_id=buy_order.id,
+                sell_order_id=sell_order.id,
+                product=buy_order.product or sell_order.product or "Товар",
+                region=buy_order.region or sell_order.region,
+                buy_price=buy_price,
+                sell_price=sell_price,
+                margin=margin,
+                status=DealStatus.COLD,
+                buyer_chat_id=buy_order.chat_id,
+                buyer_sender_id=buy_order.sender_id,
+            )
+            db.add(deal)
+            await db.flush()
 
-                    # Explicitly set relationships so they're available without refresh
-                    deal.sell_order = sell_order
-                    deal.buy_order = buy_order
+            # Explicitly set relationships so they're available without refresh
+            deal.sell_order = sell_order
+            deal.buy_order = buy_order
 
-                    # Mark orders as matched (deactivate)
-                    buy_order.is_active = False
-                    sell_order.is_active = False
+            # Mark orders as matched (deactivate)
+            buy_order.is_active = False
+            sell_order.is_active = False
 
-                    logger.info(f"Created deal #{deal.id}: {deal.product} (margin: {margin})")
-                    return deal
+            logger.info(f"Created deal #{deal.id}: {deal.product} (margin: {margin})")
+            return deal
 
     return None
 

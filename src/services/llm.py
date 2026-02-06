@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from openai import AsyncOpenAI
 
@@ -24,73 +24,185 @@ def _get_client() -> Optional[AsyncOpenAI]:
     return _client
 
 
-SELLER_SYSTEM_PROMPT = """\
-Ты — заинтересованный покупатель б/у техники, ведёшь переписку в Telegram. \
-Твоя задача: узнать максимум информации о товаре и только после этого получить номер телефона для созвона.
+# =====================================================
+# DYNAMIC PROMPT BUILDERS
+# =====================================================
 
+_COMMON_RULES = """\
 Правила общения:
 - Пиши КОРОТКО, 1-2 предложения максимум, как реальный человек в мессенджере
 - Без эмодзи, без капса, без восклицательных знаков
-- Не используй формальное обращение ("Здравствуйте", "Уважаемый") — только "привет" / "здравствуйте" в первом сообщении
 - Пиши строчными буквами, можно без точек — как в обычном чате
 - НЕ представляйся, НЕ называй своё имя
 - НЕ говори что ты бот или ИИ
+- НИКОГДА не спрашивай то, что тебе УЖЕ ИЗВЕСТНО
+- НЕ повторяй вопросы, которые уже были в диалоге"""
 
-Стратегия переговоров (СТРОГО по порядку):
-1. Уточни актуальность
-2. Узнай состояние (царапины, дефекты, комплект)
-3. Узнай город продавца
-4. Узнай характеристики (память, цвет, конфигурация)
-5. Обсуди цену (попроси скидку если уместно)
-6. ТОЛЬКО ПОСЛЕ всего вышеперечисленного — попроси номер телефона
 
-ВАЖНО: НЕ проси номер телефона пока не узнал: состояние, город, характеристики. \
-Если чего-то не хватает — спроси сначала об этом.
+def build_seller_system_prompt(
+    known_data: Optional[Dict[str, str]] = None,
+    missing_fields: Optional[List[str]] = None,
+) -> str:
+    """Build dynamic system prompt for talking TO a seller."""
+    known = known_data or {}
+    missing = missing_fields or []
 
-Ответ строго в JSON (без markdown, без ```):
-{"action": "respond", "message": "текст ответа", "phone": null}
+    parts = [
+        "Ты — заинтересованный покупатель, ведёшь переписку в Telegram. "
+        "Твоя задача: узнать максимум информации о товаре и только после этого получить номер телефона для созвона.",
+        "",
+        _COMMON_RULES,
+    ]
 
-Значения action:
-- "respond" — продолжить диалог (написать сообщение)
-- "close" — продавец отказал/товар продан, вежливо прощаемся
-- "warm" — получили номер телефона (извлеки его в поле phone)\
-"""
+    # Known data section
+    known_lines = []
+    if known.get("region"):
+        known_lines.append(f"Город продавца: {known['region']}")
+    if known.get("condition"):
+        known_lines.append(f"Состояние: {known['condition']}")
+    if known.get("specs"):
+        known_lines.append(f"Характеристики: {known['specs']}")
+    if known.get("price"):
+        known_lines.append(f"Цена: {known['price']}")
 
-BUYER_SYSTEM_PROMPT = """\
-Ты — продавец/посредник, нашёл товар по запросу покупателя и пишешь ему в Telegram. \
-Твоя задача: подтвердить интерес, узнать детали и только потом получить контакт.
+    if known_lines:
+        parts.append("")
+        parts.append("УЖЕ ИЗВЕСТНО (НЕ спрашивай об этом):")
+        for line in known_lines:
+            parts.append(f"- {line}")
 
-Правила общения:
-- Пиши КОРОТКО, 1-2 предложения максимум
-- Без эмодзи, без капса
-- Как обычный человек в мессенджере, строчными буквами
-- НЕ представляйся, НЕ называй своё имя
-- НЕ говори что ты бот или ИИ
-- НИКОГДА не называй конкретную цену или стоимость товара
-- Если покупатель спрашивает цену — спроси на какой бюджет он рассчитывает
-- Цена — это внутренняя информация, покупатель НЕ должен её знать
+    # Dynamic strategy — only missing fields
+    strategy_steps = []
+    step = 1
+    if "condition" in missing:
+        strategy_steps.append(f"{step}. Узнай состояние товара (дефекты, нюансы)")
+        step += 1
+    if "city" in missing:
+        strategy_steps.append(f"{step}. Узнай город продавца")
+        step += 1
+    if "specs" in missing:
+        strategy_steps.append(f"{step}. Узнай основные характеристики товара")
+        step += 1
+    if "price" in missing:
+        strategy_steps.append(f"{step}. Обсуди цену (попроси скидку если уместно)")
+        step += 1
 
-Стратегия переговоров (СТРОГО по порядку):
-1. Подтверди интерес покупателя
-2. Узнай предпочтения по конфигурации (память, цвет, комплект)
-3. Узнай город покупателя
-4. Узнай бюджет (на какую сумму рассчитывает)
-5. ТОЛЬКО ПОСЛЕ всего вышеперечисленного — попроси номер телефона
+    if strategy_steps:
+        parts.append("")
+        parts.append("Стратегия (СТРОГО по порядку, спрашивай по одному):")
+        parts.extend(strategy_steps)
+        parts.append(f"{step}. ТОЛЬКО ПОСЛЕ всего вышеперечисленного — попроси номер телефона")
+        parts.append("")
+        missing_labels = []
+        if "condition" in missing:
+            missing_labels.append("состояние")
+        if "city" in missing:
+            missing_labels.append("город")
+        if "specs" in missing:
+            missing_labels.append("характеристики")
+        if "price" in missing:
+            missing_labels.append("цену")
+        parts.append(f"ОБЯЗАТЕЛЬНО — НЕ ПРОСИ ТЕЛЕФОН пока не узнал: {', '.join(missing_labels)}.")
+    else:
+        parts.append("")
+        parts.append("Вся необходимая информация собрана — можешь попросить номер телефона для созвона.")
 
-ВАЖНО: НЕ проси номер телефона пока не узнал: город, предпочтения, бюджет. \
-Если чего-то не хватает — спроси сначала об этом.
+    parts.append("")
+    parts.append('Ответ строго в JSON (без markdown, без ```):\n{"action": "respond", "message": "текст ответа", "phone": null}')
+    parts.append("")
+    parts.append("Значения action:")
+    parts.append('- "respond" — продолжить диалог (написать сообщение)')
+    parts.append('- "close" — продавец отказал/товар продан, вежливо прощаемся')
+    parts.append('- "warm" — получили номер телефона (извлеки его в поле phone)')
 
-Ответ строго в JSON (без markdown, без ```):
-{"action": "respond", "message": "текст ответа", "phone": null}
+    return "\n".join(parts)
 
-Значения action:
-- "respond" — продолжить диалог
-- "close" — покупатель отказался / не интересно
-- "warm" — получили номер телефона (извлеки его в поле phone)\
-"""
+
+def build_buyer_system_prompt(
+    known_data: Optional[Dict[str, str]] = None,
+    missing_fields: Optional[List[str]] = None,
+) -> str:
+    """Build dynamic system prompt for talking TO a buyer."""
+    known = known_data or {}
+    missing = missing_fields or []
+
+    parts = [
+        "Ты — продавец/посредник, нашёл товар по запросу покупателя и пишешь ему в Telegram. "
+        "Твоя задача: подтвердить интерес, узнать детали и только потом получить контакт.",
+        "",
+        _COMMON_RULES,
+        "- НИКОГДА не называй конкретную цену или стоимость товара",
+        "- Если покупатель спрашивает цену — спроси на какой бюджет он рассчитывает",
+        "- Цена — это внутренняя информация, покупатель НЕ должен её знать",
+    ]
+
+    # Known data section
+    known_lines = []
+    if known.get("region"):
+        known_lines.append(f"Город покупателя: {known['region']}")
+    if known.get("preferences"):
+        known_lines.append(f"Предпочтения: {known['preferences']}")
+    if known.get("budget"):
+        known_lines.append(f"Бюджет: {known['budget']}")
+
+    if known_lines:
+        parts.append("")
+        parts.append("УЖЕ ИЗВЕСТНО (НЕ спрашивай об этом):")
+        for line in known_lines:
+            parts.append(f"- {line}")
+
+    # Dynamic strategy — only missing fields
+    strategy_steps = []
+    step = 1
+    if "preferences" in missing:
+        strategy_steps.append(f"{step}. Узнай предпочтения покупателя (что именно интересует)")
+        step += 1
+    if "city" in missing:
+        strategy_steps.append(f"{step}. Узнай город покупателя")
+        step += 1
+    if "price" in missing:
+        strategy_steps.append(f"{step}. Узнай бюджет (на какую сумму рассчитывает)")
+        step += 1
+
+    if strategy_steps:
+        parts.append("")
+        parts.append("Стратегия (СТРОГО по порядку, спрашивай по одному):")
+        parts.extend(strategy_steps)
+        parts.append(f"{step}. ТОЛЬКО ПОСЛЕ всего вышеперечисленного — попроси номер телефона")
+        parts.append("")
+        missing_labels = []
+        if "preferences" in missing:
+            missing_labels.append("предпочтения")
+        if "city" in missing:
+            missing_labels.append("город")
+        if "price" in missing:
+            missing_labels.append("бюджет")
+        parts.append(f"ОБЯЗАТЕЛЬНО — НЕ ПРОСИ ТЕЛЕФОН пока не узнал: {', '.join(missing_labels)}.")
+    else:
+        parts.append("")
+        parts.append("Вся необходимая информация собрана — можешь попросить номер телефона для связи.")
+
+    parts.append("")
+    parts.append('Ответ строго в JSON (без markdown, без ```):\n{"action": "respond", "message": "текст ответа", "phone": null}')
+    parts.append("")
+    parts.append("Значения action:")
+    parts.append('- "respond" — продолжить диалог')
+    parts.append('- "close" — покупатель отказался / не интересно')
+    parts.append('- "warm" — получили номер телефона (извлеки его в поле phone)')
+
+    return "\n".join(parts)
+
+
+# Static fallbacks (used when known_data/missing_fields not available)
+SELLER_SYSTEM_PROMPT = build_seller_system_prompt(
+    missing_fields=["condition", "city", "specs", "price"]
+)
+BUYER_SYSTEM_PROMPT = build_buyer_system_prompt(
+    missing_fields=["preferences", "city", "price"]
+)
 
 INITIAL_SELLER_SYSTEM_PROMPT = """\
-Напиши ПЕРВОЕ сообщение продавцу б/у товара в Telegram. \
+Напиши ПЕРВОЕ сообщение продавцу товара в Telegram. \
 Ты хочешь купить его товар. Напиши коротко и естественно — спроси актуально ли ещё.
 
 Правила:
@@ -192,6 +304,8 @@ async def generate_negotiation_response(
     missing_data_hint: Optional[str] = None,
     listing_text: Optional[str] = None,
     cross_context: Optional[str] = None,
+    known_data: Optional[Dict[str, str]] = None,
+    missing_fields: Optional[List[str]] = None,
 ) -> Optional[dict]:
     """
     Generate a negotiation response using OpenAI.
@@ -204,6 +318,8 @@ async def generate_negotiation_response(
         missing_data_hint: подсказка о недостающих данных для LLM
         listing_text: original listing text for context
         cross_context: info from the other side of the deal
+        known_data: already collected data dict
+        missing_fields: list of still-missing field names
 
     Returns:
         {'action': 'respond'|'close'|'warm', 'message': str, 'phone': str|None}
@@ -213,7 +329,15 @@ async def generate_negotiation_response(
     if not client:
         return None
 
-    system_prompt = SELLER_SYSTEM_PROMPT if role == "seller" else BUYER_SYSTEM_PROMPT
+    # Use dynamic prompt if known_data provided, otherwise static fallback
+    if known_data is not None or missing_fields is not None:
+        if role == "seller":
+            system_prompt = build_seller_system_prompt(known_data, missing_fields)
+        else:
+            system_prompt = build_buyer_system_prompt(known_data, missing_fields)
+    else:
+        system_prompt = SELLER_SYSTEM_PROMPT if role == "seller" else BUYER_SYSTEM_PROMPT
+
     # Никогда не передаём цену покупателю — это внутренняя информация
     effective_price = price if role == "seller" else None
     messages = _build_messages(
