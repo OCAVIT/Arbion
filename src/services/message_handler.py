@@ -90,8 +90,8 @@ PHONE_PATTERNS = [
 
 # Region patterns - expanded list with common abbreviations
 REGIONS = [
-    'москва', 'мск', 'moscow', 'мос',
-    'питер', 'спб', 'санкт-петербург', 'петербург', 'ленинград',
+    'москва', 'москве', 'москву', 'москвы', 'мск', 'moscow', 'мос',
+    'питер', 'питере', 'спб', 'санкт-петербург', 'санкт-петербурге', 'петербург', 'петербурге', 'ленинград',
     'новосибирск', 'нск', 'новосиб',
     'екатеринбург', 'екб', 'екат',
     'казань', 'кзн',
@@ -164,12 +164,18 @@ REGIONS = [
 REGION_NORMALIZE = {
     'мск': 'Москва',
     'москва': 'Москва',
+    'москве': 'Москва',
+    'москву': 'Москва',
+    'москвы': 'Москва',
     'moscow': 'Москва',
     'мос': 'Москва',
     'спб': 'Санкт-Петербург',
     'питер': 'Санкт-Петербург',
+    'питере': 'Санкт-Петербург',
     'санкт-петербург': 'Санкт-Петербург',
+    'санкт-петербурге': 'Санкт-Петербург',
     'петербург': 'Санкт-Петербург',
+    'петербурге': 'Санкт-Петербург',
     'ленинград': 'Санкт-Петербург',
     'нск': 'Новосибирск',
     'новосиб': 'Новосибирск',
@@ -507,8 +513,34 @@ def _passive_save_message(db, negotiation, message_text: str, role: MessageRole,
     )
 
 
-# Stages where AI should NOT generate responses (manager took over or deal done)
-_AI_SILENT_STAGES = {NegotiationStage.CLOSED, NegotiationStage.WARM, NegotiationStage.HANDED_TO_MANAGER}
+# Stages where AI ALWAYS stays silent (deal done or manager took over)
+_AI_ALWAYS_SILENT = {NegotiationStage.CLOSED, NegotiationStage.HANDED_TO_MANAGER}
+
+
+def _should_ai_respond(negotiation, side: str) -> bool:
+    """
+    Check if AI should respond for this side of the negotiation.
+
+    Each side (seller/buyer) is independent:
+    - CLOSED / HANDED_TO_MANAGER → always silent
+    - WARM → silent only for the side that already gave phone
+    - Otherwise → AI responds
+    """
+    if negotiation.stage in _AI_ALWAYS_SILENT:
+        return False
+
+    if negotiation.stage == NegotiationStage.WARM:
+        deal = negotiation.deal
+        if side == "seller" and deal.seller_phone:
+            # Seller already gave phone — no need to talk further
+            return False
+        if side == "buyer" and deal.buyer_phone:
+            # Buyer already gave phone — no need to talk further
+            return False
+        # The OTHER side went warm, but this side still needs to give phone
+        return True
+
+    return True
 
 
 async def check_negotiation_response(db, sender_id: int, message_text: str) -> bool:
@@ -516,9 +548,10 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
     Проверка, является ли сообщение ответом на активные переговоры.
     Если да - обрабатывает через AI negotiator.
 
-    For WARM / HANDED_TO_MANAGER / CLOSED negotiations:
-    - Save the message passively (manager sees it in chat)
-    - Do NOT generate AI response
+    Each side (seller/buyer) is handled independently:
+    - If this side already gave phone → passive save
+    - If the OTHER side gave phone but this side hasn't → AI continues
+    - CLOSED / HANDED_TO_MANAGER → always passive
 
     Args:
         db: Database session
@@ -559,8 +592,7 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
                 f">>> НАЙДЕНЫ переговоры #{negotiation.id} для продавца {sender_id} "
                 f"(stage={negotiation.stage.value}, deal_id={negotiation.deal_id})"
             )
-            # If negotiation is in silent stage, save passively
-            if negotiation.stage in _AI_SILENT_STAGES:
+            if not _should_ai_respond(negotiation, "seller"):
                 _passive_save_message(db, negotiation, message_text, MessageRole.SELLER, MessageTarget.SELLER)
                 await db.flush()
                 return True
@@ -595,8 +627,7 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
                 f">>> НАЙДЕНЫ переговоры #{negotiation.id} для покупателя {sender_id} "
                 f"(stage={negotiation.stage.value}, deal_id={negotiation.deal_id})"
             )
-            # If negotiation is in silent stage, save passively
-            if negotiation.stage in _AI_SILENT_STAGES:
+            if not _should_ai_respond(negotiation, "buyer"):
                 _passive_save_message(db, negotiation, message_text, MessageRole.BUYER, MessageTarget.BUYER)
                 await db.flush()
                 return True
