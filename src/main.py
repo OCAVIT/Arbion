@@ -108,6 +108,7 @@ async def lifespan(app: FastAPI):
             "matcher_interval_minutes": 10,
             "negotiator_interval_minutes": 15,
             "seed_queries": [],
+            "ai_mode": "copilot",
         }
 
         for key, value in default_settings.items():
