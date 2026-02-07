@@ -60,13 +60,13 @@ INITIAL_BUYER_TEMPLATES = [
     "здравствуйте, {product} в наличии - подойдёт?",
 ]
 
-# Ответы на положительную реакцию (первый ответ)
+# Ответы на положительную реакцию (первый ответ) — универсальные
 FOLLOWUP_POSITIVE_FIRST = [
-    "отлично! а состояние какое? есть косяки?",
+    "отлично! а состояние какое? есть нюансы?",
     "супер, что по состоянию скажешь?",
-    "хорошо, а по состоянию как? царапины, сколы есть?",
-    "понял, расскажи про состояние - важно чтобы всё работало",
-    "ок, а комплект полный? коробка есть?",
+    "хорошо, а всё в порядке? нюансы какие-нибудь есть?",
+    "понял, расскажи про состояние - важно чтобы всё было ок",
+    "ок, а по качеству как? есть что-нибудь?",
 ]
 
 # Уточнение цены (для продавца)
@@ -196,7 +196,7 @@ PRICE_KEYWORDS = [
 CONDITION_KEYWORDS = [
     'состояние', 'царапины', 'сколы', 'работает', 'новый', 'бу',
     'идеал', 'норм', 'хорошее', 'отличное', 'без косяков',
-    'комплект', 'коробка', 'зарядка', 'аккумулятор', 'экран',
+    'комплект', 'дефект', 'качество', 'износ', 'нюансы', 'целый',
 ]
 
 CONTACT_KEYWORDS = [
@@ -226,9 +226,9 @@ def _is_condition_question(last_ai_message: str) -> bool:
     """Проверяет, спрашивал ли бот о состоянии/дефектах."""
     lower = last_ai_message.lower()
     condition_question_markers = [
-        'трещин', 'царапин', 'сколы', 'сколов', 'битых пикселей',
+        'трещин', 'царапин', 'сколы', 'сколов',
         'косяки', 'косяков', 'дефект', 'состояние', 'работает',
-        'аккумулятор', 'камера', 'звук', 'экран',
+        'качество', 'нюансы', 'в порядке', 'износ',
     ]
     return any(marker in lower for marker in condition_question_markers)
 
@@ -595,15 +595,15 @@ async def build_cross_context(deal: DetectedDeal, current_target: str, db: Async
     parts = []
 
     if current_target == "buyer":
-        # Give buyer info about what seller said (but NEVER the price)
+        # Give buyer product info from seller (NEVER price!) — buyer can share this
         if deal.seller_condition:
-            parts.append(f"Состояние товара (от продавца): {deal.seller_condition}")
+            parts.append(f"Состояние: {deal.seller_condition}")
         if deal.seller_city:
-            parts.append(f"Город продавца: {deal.seller_city}")
+            parts.append(f"Город: {deal.seller_city}")
         if deal.seller_specs:
             parts.append(f"Характеристики: {deal.seller_specs}")
     elif current_target == "seller":
-        # Give seller info about buyer preferences
+        # Give seller info about buyer preferences (internal, don't reveal directly)
         if deal.buy_price:
             parts.append(f"Бюджет покупателя: {deal.buy_price}")
         if deal.region:
@@ -612,7 +612,10 @@ async def build_cross_context(deal: DetectedDeal, current_target: str, db: Async
     if not parts:
         return None
 
-    return "Информация с другой стороны сделки (используй для контекста, НЕ раскрывай напрямую):\n" + "\n".join(f"- {p}" for p in parts)
+    if current_target == "buyer":
+        return "ИНФОРМАЦИЯ О ТОВАРЕ (используй для ответов покупателю, подавай как свои знания):\n" + "\n".join(f"- {p}" for p in parts)
+    else:
+        return "Внутренняя информация (используй для контекста, НЕ раскрывай напрямую):\n" + "\n".join(f"- {p}" for p in parts)
 
 
 def _extract_condition_from_text(text: str) -> Optional[str]:
