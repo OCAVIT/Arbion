@@ -97,7 +97,7 @@ class TelegramService:
 
         self._message_handlers.append(wrapper)
 
-    async def send_message(self, recipient_id: int, text: str, typing_delay: float = 0) -> bool:
+    async def send_message(self, recipient_id: int, text: str, typing_delay: float = 0) -> int | None:
         """
         Send a message to a user or chat.
 
@@ -107,11 +107,12 @@ class TelegramService:
             typing_delay: Seconds to show "typing" before sending (0 = no typing)
 
         Returns:
-            True if sent successfully, False otherwise
+            Telegram message ID if sent successfully, None otherwise.
+            For backwards compatibility, truthy (int) means success, falsy (None) means failure.
         """
         if not self.client:
             logger.warning("Cannot send message: Telegram client not initialized")
-            return False
+            return None
 
         try:
             entity = await self.client.get_entity(recipient_id)
@@ -121,20 +122,20 @@ class TelegramService:
                 async with self.client.action(entity, 'typing'):
                     await asyncio.sleep(typing_delay)
 
-            await self.client.send_message(entity, text)
+            sent_msg = await self.client.send_message(entity, text)
             # Mark their messages as read so it shows "read" in Telegram
             try:
                 await self.client.send_read_acknowledge(entity)
             except Exception:
                 pass  # Non-critical, don't fail the send
-            logger.info(f"Message sent to {recipient_id}")
-            return True
+            logger.info(f"Message sent to {recipient_id} (msg_id={sent_msg.id})")
+            return sent_msg.id
         except ValueError:
             logger.error(f"User {recipient_id} not found")
-            return False
+            return None
         except Exception as e:
             logger.error(f"Failed to send message: {e}")
-            return False
+            return None
 
     async def get_entity(self, entity_id: int):
         """Get a Telegram entity by ID."""

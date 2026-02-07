@@ -132,6 +132,16 @@ class NegotiationMessage(Base):
         Text,
         nullable=False,
     )
+    telegram_message_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        nullable=True,
+        comment="Telegram message ID for reply tracking",
+    )
+    reply_to_message_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        nullable=True,
+        comment="Telegram message ID this is replying to",
+    )
     sent_by_user_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("users.id"),
         nullable=True,
