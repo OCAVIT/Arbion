@@ -1,5 +1,6 @@
 """OpenAI LLM integration for AI negotiations."""
 
+import asyncio
 import json
 import logging
 from typing import Dict, List, Optional
@@ -257,31 +258,32 @@ BUYER_SYSTEM_PROMPT = build_buyer_system_prompt(
 )
 
 INITIAL_SELLER_SYSTEM_PROMPT = """\
-Напиши ПЕРВОЕ сообщение продавцу товара в Telegram. \
-Ты хочешь купить его товар. Напиши коротко и естественно — спроси актуально ли ещё.
+Напиши ПЕРВОЕ сообщение продавцу стройматериалов в Telegram-чате. \
+Ты — снабженец, ищешь этот товар. Напиши коротко и по-деловому.
 
 Правила:
-- 1 короткое предложение
-- Можно "привет" или "здравствуйте"
-- Упомяни название товара
-- Без эмодзи, как обычный человек в чате
-- НЕ представляйся
+- 1-2 коротких предложения
+- Пиши "привет" или "добрый день" (НЕ "здравствуйте" — слишком формально для чата)
+- Упомяни ПОЛНОЕ название товара (с маркой и размером, как указано в поле "Товар")
+- Спроси актуально ли, какой минимальный объём, есть ли сертификат
+- Без эмодзи, как реальный снабженец в рабочем чате
+- НЕ представляйся, НЕ называй компанию
 
 Ответ строго в JSON: {"action": "respond", "message": "текст", "phone": null}\
 """
 
 INITIAL_BUYER_SYSTEM_PROMPT = """\
-Напиши ПЕРВОЕ сообщение покупателю в Telegram. \
-Ты нашёл товар по его запросу и предлагаешь. Напиши коротко и естественно.
+Напиши ПЕРВОЕ сообщение покупателю стройматериалов в Telegram-чате. \
+Ты нашёл товар по его запросу и предлагаешь. Пиши как живой снабженец.
 
 Правила:
-- 1 короткое предложение
-- Можно "привет" или "здравствуйте"
-- Упомяни название товара
+- 1-2 коротких предложения
+- Пиши "привет" или "добрый день" (НЕ "здравствуйте" — слишком формально)
+- Упомяни ПОЛНОЕ название товара (с маркой и размером)
+- НИКОГДА не называй конкретную цену, стоимость или сумму
+- Предложи обсудить условия и объём
 - Без эмодзи
-- НЕ представляйся
-- НИКОГДА не упоминай конкретную цену, стоимость или сумму
-- Просто предложи товар без цифр
+- НЕ представляйся, НЕ называй компанию
 
 Ответ строго в JSON: {"action": "respond", "message": "текст", "phone": null}\
 """
@@ -348,6 +350,81 @@ def _parse_llm_response(text: str) -> Optional[dict]:
         }
     except (json.JSONDecodeError, AttributeError):
         logger.warning(f"Failed to parse LLM response as JSON: {text[:100]}")
+        return None
+
+
+# =====================================================
+# ORDER EXTRACTION VIA LLM
+# =====================================================
+
+_ORDER_EXTRACTION_PROMPT = """\
+Ты — парсер B2B-сообщений из Telegram-чатов оптовой торговли стройматериалами.
+Проанализируй сообщение и извлеки структурированные данные.
+
+Верни JSON строго в формате (без markdown, без ```):
+{
+    "order_type": "buy" или "sell" или null,
+    "product": "полное название товара с маркой и размером",
+    "niche": "стройматериалы" или "сельхоз" или null,
+    "price": число или null,
+    "unit": "тонна" или "м²" или "м³" или "шт" или "рулон" или "лист" или "мешок" или "поддон" или "вагон" или null,
+    "volume": число или null,
+    "region": "название города" или null
+}
+
+Правила:
+- order_type: "buy" если хотят купить (куплю/нужна/ищу/закупаем/требуется/кто продаёт), \
+"sell" если продают (продам/продаю/в наличии/реализуем/отгрузим/остатки/склад)
+- product: ПОЛНОЕ описание — "арматура А500С 12мм", "цемент М500", "газоблок D500 600х300х200". \
+НЕ "арматура 10", а "арматура А500С 10-12мм" (включай марку и диаметр/размер)
+- price: только число. "50к"→50000, "50 тыс"→50000, "47000р/тн"→47000
+- unit: единица измерения цены или объёма
+- volume: только число
+- region: нормализованное название города (МСК→Москва, СПб→Санкт-Петербург, Нижний→Нижний Новгород)
+- Если данных нет — null
+- Если сообщение НЕ является заявкой на покупку/продажу — order_type: null"""
+
+
+async def extract_order_llm(text: str, timeout: float = 5.0) -> Optional[dict]:
+    """Extract structured order data from text using GPT-4o-mini.
+
+    Args:
+        text: Message text to parse
+        timeout: Max seconds to wait for response
+
+    Returns:
+        Parsed order dict or None on failure/timeout
+    """
+    client = _get_client()
+    if not client:
+        return None
+
+    try:
+        response = await asyncio.wait_for(
+            client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": _ORDER_EXTRACTION_PROMPT},
+                    {"role": "user", "content": text},
+                ],
+                temperature=0,
+                max_tokens=300,
+                response_format={"type": "json_object"},
+            ),
+            timeout=timeout,
+        )
+        raw = response.choices[0].message.content
+        result = json.loads(raw)
+        if not isinstance(result, dict):
+            return None
+
+        logger.info(f"LLM extraction result: order_type={result.get('order_type')}, product={result.get('product')}")
+        return result
+    except asyncio.TimeoutError:
+        logger.warning(f"LLM extraction timeout ({timeout}s)")
+        return None
+    except Exception as e:
+        logger.warning(f"LLM extraction error: {e}")
         return None
 
 

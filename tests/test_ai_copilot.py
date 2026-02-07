@@ -272,8 +272,11 @@ class TestInitiateNegotiationCopilot:
 
         # Should return None (no Negotiation created)
         assert result is None
-        # Draft should be saved
-        assert deal.ai_draft_message == "привет, арматура ещё актуальна?"
+        # Draft should be saved as JSON with seller/buyer keys
+        assert deal.ai_draft_message is not None
+        draft_data = json.loads(deal.ai_draft_message)
+        assert draft_data["seller"] == "привет, арматура ещё актуальна?"
+        assert "buyer" in draft_data
         # Market context should be JSON
         assert deal.market_price_context is not None
         ctx = json.loads(deal.market_price_context)

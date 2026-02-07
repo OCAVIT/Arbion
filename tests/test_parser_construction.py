@@ -428,3 +428,121 @@ class TestEdgeCases:
     def test_price_unit_none_when_no_unit(self):
         """No price-per-unit expression → None."""
         assert extract_price_unit("просто цена 50000") is None
+
+
+# =====================================================
+# Full product extraction tests (brand + diameter + size)
+# =====================================================
+
+class TestFullProductExtraction:
+    """Test that extract_product captures grade, diameter, and size."""
+
+    def test_sell_armatura_full(self):
+        """'Продаю арматуру А500С 12мм' should include А500С and 12мм."""
+        product, niche = extract_product("Продаю арматуру А500С 12мм, 47000/тн, от 20т, Тула")
+        assert product is not None
+        lower = product.lower()
+        assert "арматур" in lower
+        assert "500" in lower  # А500С
+        assert "12мм" in lower  # diameter
+
+    def test_buy_armatura_range(self):
+        """'Нужна арматура 10-12мм' should include diameter range."""
+        product, niche = extract_product("Нужна арматура 10-12мм, 40 тонн, Москва")
+        assert product is not None
+        lower = product.lower()
+        assert "арматур" in lower
+        assert "10" in lower
+        assert "12мм" in lower
+
+    def test_profnastil_grade(self):
+        """Профнастил С21 should include С21."""
+        product, niche = extract_product("Профнастил С21 0.5мм оцинк, 580р/м²")
+        assert product is not None
+        lower = product.lower()
+        assert "профнастил" in lower
+        assert "21" in lower  # С21
+
+    def test_gazoblock_full(self):
+        """Газоблок D500 600х300х200 should include grade and size."""
+        product, niche = extract_product("Кто продаёт газоблок D500 600х300х200?")
+        assert product is not None
+        lower = product.lower()
+        assert "газоблок" in lower
+        assert "500" in lower  # D500
+        assert "600" in lower  # size
+
+    def test_cement_grade(self):
+        """Цемент М500 should include М500."""
+        product, niche = extract_product("Цемент М500 навал, 4200/тн")
+        assert product is not None
+        lower = product.lower()
+        assert "цемент" in lower
+        assert "500" in lower  # М500
+
+    def test_brus_size(self):
+        """Брус 150х150 should include size."""
+        product, niche = extract_product("Остатки бруса 150х150, 12000 руб/м³")
+        assert product is not None
+        lower = product.lower()
+        assert "брус" in lower
+        assert "150" in lower  # size
+
+
+# =====================================================
+# LLM extraction validation tests
+# =====================================================
+
+class TestLLMValidation:
+    """Test _validate_llm_extraction and _is_potential_order."""
+
+    def test_is_potential_order_true(self):
+        from src.services.message_handler import _is_potential_order
+        assert _is_potential_order("Продаю арматуру А500С 12мм, 47000/тн") is True
+
+    def test_is_potential_order_too_short(self):
+        from src.services.message_handler import _is_potential_order
+        assert _is_potential_order("куплю цемент") is False  # <=15 chars
+
+    def test_is_potential_order_no_keywords(self):
+        from src.services.message_handler import _is_potential_order
+        assert _is_potential_order("Привет, как дела? Всё хорошо у вас?") is False
+
+    def test_validate_valid(self):
+        from src.services.message_handler import _validate_llm_extraction
+        result = _validate_llm_extraction({
+            "order_type": "sell",
+            "product": "арматура А500С 12мм",
+            "niche": "стройматериалы",
+            "price": 47000,
+            "unit": "тонна",
+            "volume": 20,
+            "region": "Тула",
+        })
+        assert result is not None
+        assert result["order_type"] == "sell"
+        assert result["product"] == "арматура А500С 12мм"
+        assert result["price"] == 47000.0
+
+    def test_validate_no_order_type(self):
+        from src.services.message_handler import _validate_llm_extraction
+        result = _validate_llm_extraction({
+            "order_type": None,
+            "product": "арматура",
+        })
+        assert result is None
+
+    def test_validate_price_out_of_range(self):
+        from src.services.message_handler import _validate_llm_extraction
+        result = _validate_llm_extraction({
+            "order_type": "buy",
+            "product": "арматура",
+            "price": 50,  # too low
+        })
+        assert result is not None
+        assert result["price"] is None  # price rejected but order still valid
+
+    def test_validate_empty(self):
+        from src.services.message_handler import _validate_llm_extraction
+        assert _validate_llm_extraction(None) is None
+        assert _validate_llm_extraction({}) is None

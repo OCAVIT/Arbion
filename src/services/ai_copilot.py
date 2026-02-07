@@ -43,29 +43,45 @@ async def get_ai_mode(db: AsyncSession) -> str:
 class AICopilot:
     """AI Copilot for manager assistance."""
 
-    async def generate_initial_draft(self, deal: DetectedDeal, db: AsyncSession) -> str:
-        """Генерирует драфт первого сообщения продавцу.
+    async def generate_initial_draft(
+        self, deal: DetectedDeal, db: AsyncSession, target: str = "seller"
+    ) -> str:
+        """Генерирует драфт первого сообщения продавцу или покупателю.
 
         Формат: короткое, человечное, от первого лица.
-        НЕ 'мы компания Arbion'. А 'Привет! Арматура А500С ещё актуальна? Какой объём минимальный?'
+        Привет! Арматура А500С 12мм ещё актуальна? Какой минимальный объём?
+
+        Args:
+            target: "seller" или "buyer"
         """
-        # Get sell order for context
-        result = await db.execute(
-            select(Order).where(Order.id == deal.sell_order_id)
-        )
-        sell_order = result.scalar_one_or_none()
-        listing_text = sell_order.raw_text if sell_order else None
-        price_str = str(deal.sell_price) if deal.sell_price else None
+        if target == "seller":
+            result = await db.execute(
+                select(Order).where(Order.id == deal.sell_order_id)
+            )
+            order = result.scalar_one_or_none()
+            listing_text = order.raw_text if order else None
+            price_str = str(deal.sell_price) if deal.sell_price else None
 
-        # Try LLM first
-        draft = await llm.generate_initial_message(
-            "seller", deal.product, price_str,
-            listing_text=listing_text,
-        )
+            draft = await llm.generate_initial_message(
+                "seller", deal.product, price_str,
+                listing_text=listing_text,
+            )
+            if not draft:
+                draft = generate_response('initial_seller', deal.product)
+        else:
+            result = await db.execute(
+                select(Order).where(Order.id == deal.buy_order_id)
+            )
+            order = result.scalar_one_or_none()
+            listing_text = order.raw_text if order else None
 
-        if not draft:
-            # Fallback to template
-            draft = generate_response('initial_seller', deal.product)
+            # Never reveal price to buyer
+            draft = await llm.generate_initial_message(
+                "buyer", deal.product, None,
+                listing_text=listing_text,
+            )
+            if not draft:
+                draft = generate_response('initial_buyer', deal.product)
 
         return draft
 

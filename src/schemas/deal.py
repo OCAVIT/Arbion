@@ -160,9 +160,16 @@ class ManagerDealResponse(BaseModel):
     market_price_context: Optional[str] = None  # Manager sees market context
     platform: str = "telegram"
 
+    # Seller city (from sell order region)
+    seller_city: Optional[str] = None
+
     # Volume info from linked order
     volume: Optional[str] = None  # e.g. "20 тонна", "500 м²"
     unit: Optional[str] = None
+
+    # Buyer volume/region (for lead card display)
+    buyer_volume: Optional[str] = None
+    buyer_region: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -202,7 +209,7 @@ class ManagerDealResponse(BaseModel):
         if deal.status == DealStatus.HANDED_TO_MANAGER and seller_contact:
             actual_contact = seller_contact
 
-        # Extract volume from sell_order if available
+        # Extract volume from sell_order
         volume_str = None
         unit_str = None
         sell_order = getattr(deal, 'sell_order', None)
@@ -212,6 +219,19 @@ class ManagerDealResponse(BaseModel):
             if vol is not None and unit_str:
                 vol_num = float(vol)
                 volume_str = f"{int(vol_num) if vol_num == int(vol_num) else vol_num} {unit_str}"
+
+        # Extract buyer volume/region from buy_order
+        buyer_volume_str = None
+        buyer_region_str = deal.region  # deal.region = buyer's region
+        buy_order = getattr(deal, 'buy_order', None)
+        if buy_order:
+            bvol = getattr(buy_order, 'volume_numeric', None)
+            bunit = getattr(buy_order, 'unit', None)
+            if bvol is not None and bunit:
+                bvol_num = float(bvol)
+                buyer_volume_str = f"{int(bvol_num) if bvol_num == int(bvol_num) else bvol_num} {bunit}"
+            if not buyer_region_str:
+                buyer_region_str = getattr(buy_order, 'region', None)
 
         return cls(
             id=deal.id,
@@ -233,8 +253,11 @@ class ManagerDealResponse(BaseModel):
             ai_draft_message=getattr(deal, 'ai_draft_message', None),
             market_price_context=getattr(deal, 'market_price_context', None),
             platform=getattr(deal, 'platform', 'telegram'),
+            seller_city=getattr(deal, 'seller_city', None),
             volume=volume_str,
             unit=unit_str,
+            buyer_volume=buyer_volume_str,
+            buyer_region=buyer_region_str,
         )
 
 

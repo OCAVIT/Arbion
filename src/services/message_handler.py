@@ -53,7 +53,7 @@ SELL_KEYWORDS = [
 # Стройматериалы — основная ниша
 CONSTRUCTION_PRODUCTS = {
     # Металлопрокат
-    r'арматур[аыуе]?\s*[АаAa]?\s*\d*[СсCc]?\d*': 'арматура',
+    r'арматур[аыуе]?(?:\s+[АаAa]\d+[СсCc]?\d*)?': 'арматура',
     r'профнастил\w*': 'профнастил',
     r'профлист\w*': 'профлист',
     r'лист\s*(горяче|холодно)?катан\w*': 'лист стальной',
@@ -313,8 +313,11 @@ def detect_order_type(text: str) -> Optional[OrderType]:
 def extract_product(text: str) -> tuple[str | None, str | None]:
     """Извлекает продукт и нишу из текста.
 
+    Собирает полное описание: базовое имя + марка + диаметр + размер.
+    Например: 'арматура А500С 12мм', 'цемент М500', 'газоблок D500 600х300х200'.
+
     Returns:
-        (product_name, niche) — например ('арматура А500С', 'стройматериалы')
+        (product_name, niche) — например ('арматура А500С 12мм', 'стройматериалы')
     """
     text_lower = text.lower()
 
@@ -322,16 +325,44 @@ def extract_product(text: str) -> tuple[str | None, str | None]:
     for pattern, product_name in CONSTRUCTION_PRODUCTS.items():
         match = re.search(pattern, text_lower, re.IGNORECASE)
         if match:
-            # Извлечь полное описание (включая марку/размер)
-            full_product = match.group(0).strip()
-            return (full_product or product_name, 'стройматериалы')
+            # Get original-case text from match positions
+            start, end = match.start(), match.end()
+            base = text[start:end].strip()
 
-    # Потом агро (когда включим)
-    # for pattern, product_name in AGRICULTURE_PRODUCTS.items():
-    #     match = re.search(pattern, text_lower, re.IGNORECASE)
-    #     if match:
-    #         full_product = match.group(0).strip()
-    #         return (full_product or product_name, 'сельхоз')
+            # Get context after match up to next delimiter
+            after_text = text[end:]
+            delim = re.search(r'[,\n?!]|\.\s|\d{4,}\s*(?:р|руб|₽|/)', after_text)
+            context_chunk = after_text[:delim.start()] if delim else after_text[:60]
+
+            parts = [base]
+            base_lower = base.lower()
+
+            # Look for grade NOT already captured: А500С, М500, В25, D500, С21
+            grade = re.search(
+                r'[АаAa]\d+[СсCcВвBb]?\d*|[МмMm]\d+|[ВвBb]\d+|[DdДд]\d+|[СсCc]\d+',
+                context_chunk, re.IGNORECASE,
+            )
+            if grade and grade.group(0).lower() not in base_lower:
+                parts.append(grade.group(0))
+
+            # Look for diameter: д12, 10мм, 0.5мм, 10-12мм
+            diam = re.search(
+                r'(?:[дd∅⌀]\s*)?\d+(?:[.,]\d+)?(?:\s*[-–]\s*\d+(?:[.,]\d+)?)?\s*мм|[дd]\d+',
+                context_chunk, re.IGNORECASE,
+            )
+            if diam and diam.group(0).lower().strip() not in base_lower:
+                parts.append(diam.group(0).strip())
+
+            # Look for size: 150х150, 600х300х200
+            size = re.search(
+                r'\d+\s*[хx×]\s*\d+(?:\s*[хx×]\s*\d+)?',
+                context_chunk,
+            )
+            if size and size.group(0) not in base_lower:
+                parts.append(size.group(0))
+
+            full_product = ' '.join(parts)
+            return (full_product, 'стройматериалы')
 
     # Fallback: извлекаем текст после ключевого слова купли/продажи
     all_keywords = BUY_KEYWORDS + SELL_KEYWORDS
@@ -606,18 +637,21 @@ async def try_match_orders(db, new_order: Order) -> Optional[DetectedDeal]:
             sell_price = sell_order.price or Decimal('0')
             margin = buy_price - sell_price if buy_price and sell_price else Decimal('0')
 
-            # Create deal
+            # Create deal — store regions separately for buyer/seller
             deal = DetectedDeal(
                 buy_order_id=buy_order.id,
                 sell_order_id=sell_order.id,
                 product=buy_order.product or sell_order.product or "Товар",
-                region=buy_order.region or sell_order.region,
+                region=buy_order.region,
                 buy_price=buy_price,
                 sell_price=sell_price,
                 margin=margin,
                 status=DealStatus.COLD,
                 buyer_chat_id=buy_order.chat_id,
                 buyer_sender_id=buy_order.sender_id,
+                seller_city=sell_order.region,
+                niche=buy_order.niche or sell_order.niche,
+                platform='telegram',
             )
             db.add(deal)
             await db.flush()
@@ -794,6 +828,116 @@ async def check_negotiation_response(
         return False
 
 
+def _is_potential_order(text: str) -> bool:
+    """Pre-filter: check if message might be a buy/sell order.
+
+    Criteria: length > 15 chars AND contains buy/sell keyword.
+    """
+    if len(text.strip()) <= 15:
+        return False
+    return detect_order_type(text) is not None
+
+
+def _validate_llm_extraction(data: Optional[dict]) -> Optional[dict]:
+    """Validate and normalize LLM extraction results.
+
+    Returns normalized dict or None if invalid.
+    """
+    if not data or not isinstance(data, dict):
+        return None
+
+    order_type = data.get("order_type")
+    if order_type not in ("buy", "sell"):
+        return None
+
+    product = data.get("product")
+    if not product or len(str(product).strip()) < 3:
+        return None
+
+    # Normalize price
+    price = data.get("price")
+    if price is not None:
+        try:
+            price = float(price)
+            if price < 100 or price > 50_000_000:
+                price = None
+        except (ValueError, TypeError):
+            price = None
+
+    # Normalize volume
+    volume = data.get("volume")
+    if volume is not None:
+        try:
+            volume = float(volume)
+            if volume <= 0:
+                volume = None
+        except (ValueError, TypeError):
+            volume = None
+
+    return {
+        "order_type": order_type,
+        "product": str(product).strip(),
+        "niche": data.get("niche") if data.get("niche") in ("стройматериалы", "сельхоз") else None,
+        "price": price,
+        "unit": data.get("unit"),
+        "volume": volume,
+        "region": data.get("region"),
+    }
+
+
+async def _extract_order_data(text: str) -> Optional[dict]:
+    """Extract order data using LLM with regex fallback.
+
+    Flow:
+    1. Pre-filter: keywords + length > 15
+    2. Try LLM extraction (GPT-4o-mini, 5s timeout)
+    3. Validate LLM result
+    4. On failure: regex fallback
+
+    Returns dict with order data or None.
+    """
+    if not _is_potential_order(text):
+        return None
+
+    # Try LLM extraction first
+    try:
+        from src.services.llm import extract_order_llm
+        llm_result = await extract_order_llm(text)
+        validated = _validate_llm_extraction(llm_result)
+        if validated:
+            logger.info(f"LLM extraction OK: {validated.get('product')}")
+            return validated
+        logger.info("LLM extraction returned invalid data, falling back to regex")
+    except Exception as e:
+        logger.warning(f"LLM extraction failed: {e}")
+
+    # Regex fallback
+    order_type = detect_order_type(text)
+    if not order_type:
+        return None
+
+    product, niche = extract_product(text)
+    price = extract_price(text)
+    region = extract_region(text)
+    volume, unit = extract_volume(text)
+    quantity_str = extract_quantity(text)
+    if not unit:
+        unit = extract_price_unit(text)
+    if not product:
+        product = "Товар"
+
+    return {
+        "order_type": order_type.value,
+        "product": product,
+        "niche": niche,
+        "price": float(price) if price else None,
+        "unit": unit,
+        "volume": volume,
+        "region": region,
+        "quantity_str": quantity_str,
+    }
+
+
 async def _resolve_event_text(event, telegram_service) -> Optional[str]:
     """
     Convert any Telethon event to text, handling voice/media.
@@ -942,24 +1086,18 @@ async def _process_message_internal(event, telegram_service, raw_text: str = Non
                 # Продолжаем обработку как обычное сообщение
 
             if not is_negotiation_response:
-                # Если это не ответ на переговоры - проверяем, является ли это новой заявкой
-                order_type = detect_order_type(raw_text)
+                # Извлекаем данные заявки: LLM extraction + regex fallback
+                order_data = await _extract_order_data(raw_text)
 
-                if order_type:
-                    # Извлекаем товар, цену, регион, объём
-                    product, niche = extract_product(raw_text)
-                    price = extract_price(raw_text)
-                    region = extract_region(raw_text)
-                    volume, unit = extract_volume(raw_text)
-                    quantity_str = extract_quantity(raw_text)
-
-                    # Если unit не найден через volume — пробуем из цены-за-единицу
-                    if not unit:
-                        unit = extract_price_unit(raw_text)
-
-                    # Если продукт не найден — используем fallback
-                    if not product:
-                        product = "Товар"
+                if order_data:
+                    order_type = OrderType.BUY if order_data["order_type"] == "buy" else OrderType.SELL
+                    product = order_data["product"]
+                    niche = order_data.get("niche")
+                    price = Decimal(str(order_data["price"])) if order_data.get("price") else None
+                    unit = order_data.get("unit")
+                    volume = order_data.get("volume")
+                    region = order_data.get("region")
+                    quantity_str = order_data.get("quantity_str")
 
                     logger.info(
                         f"Parsed: type={order_type.value}, product={product}, "
@@ -994,7 +1132,7 @@ async def _process_message_internal(event, telegram_service, raw_text: str = Non
                             volume_numeric=Decimal(str(volume)) if volume else None,
                         )
                         db.add(order)
-                        await db.flush()  # Получаем ID заявки
+                        await db.flush()
 
                         logger.info(
                             f"Created {order_type.value} order #{order.id}: {product} "
@@ -1005,7 +1143,6 @@ async def _process_message_internal(event, telegram_service, raw_text: str = Non
                         deal = await try_match_orders(db, order)
                         if deal:
                             logger.info(f"Auto-matched into deal #{deal.id}")
-                            # Запускаем AI переговоры для новой сделки
                             try:
                                 logger.info(f"Запускаем initiate_negotiation для сделки #{deal.id}")
                                 negotiation = await initiate_negotiation(deal, db)

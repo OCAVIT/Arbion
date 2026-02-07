@@ -895,31 +895,55 @@ async def initiate_negotiation(deal: DetectedDeal, db: AsyncSession) -> Optional
 
 
 async def _initiate_copilot(deal: DetectedDeal, db: AsyncSession, copilot_svc) -> None:
-    """Copilot mode: генерирует драфт и рыночный контекст, НЕ отправляет."""
-    # Пропускаем, если драфт уже сгенерирован
+    """Copilot mode: генерирует драфты для продавца и покупателя + рыночный контекст."""
     if deal.ai_draft_message:
         logger.debug(f"Сделка {deal.id}: драфт уже есть, пропускаем")
         return None
 
-    logger.info(f"Сделка {deal.id}: copilot mode — генерируем драфт")
+    logger.info(f"Сделка {deal.id}: copilot mode — генерируем драфты")
 
-    # Генерируем драфт первого сообщения
-    draft = await copilot_svc.generate_initial_draft(deal, db)
+    # Генерируем отдельные драфты для продавца и покупателя
+    seller_draft = await copilot_svc.generate_initial_draft(deal, db, target="seller")
+    buyer_draft = await copilot_svc.generate_initial_draft(deal, db, target="buyer")
 
     # Собираем рыночный контекст
     context = await copilot_svc.build_market_context(
         deal.product, getattr(deal, 'niche', None), db
     )
 
-    # Сохраняем в сделку
-    deal.ai_draft_message = draft
+    # Добавляем подсказку по марже когда покупатель не указал цену
+    if not deal.buy_price and context.get("avg_price"):
+        avg = context["avg_price"]
+        sell_p = float(deal.sell_price) if deal.sell_price else 0
+        if sell_p and avg > sell_p:
+            est_margin = avg - sell_p
+            hint = (
+                f"Покупатель не указал цену. "
+                f"Рыночная цена: {context['min_seen']:.0f}\u2013{context['max_seen']:.0f}\u20bd/ед. "
+                f"При продаже по {avg:.0f}\u20bd маржа ~{est_margin:.0f}\u20bd/ед"
+            )
+            # Попробуем добавить расчёт на объём
+            buy_order_result = await db.execute(
+                select(Order).where(Order.id == deal.buy_order_id)
+            )
+            buy_order = buy_order_result.scalar_one_or_none()
+            if buy_order and buy_order.volume_numeric:
+                vol = float(buy_order.volume_numeric)
+                total = est_margin * vol
+                hint += f" \u00d7 {vol:.0f} = ~{total:.0f}\u20bd"
+            context["margin_hint"] = hint
+
+    # Сохраняем как JSON с обоими драфтами
+    deal.ai_draft_message = json.dumps({
+        "seller": seller_draft,
+        "buyer": buyer_draft,
+    }, ensure_ascii=False)
     deal.market_price_context = json.dumps(context, ensure_ascii=False)
-    # Статус остаётся COLD — ждёт действия менеджера
 
     await db.flush()
     logger.info(
-        f"Сделка {deal.id}: copilot драфт сохранён "
-        f"('{draft[:50]}...', sources={context.get('sources_count', 0)})"
+        f"Сделка {deal.id}: copilot драфты сохранены "
+        f"(seller='{seller_draft[:40]}...', buyer='{buyer_draft[:40]}...')"
     )
     return None
 
