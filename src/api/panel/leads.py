@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -26,7 +26,10 @@ from src.models import (
     AuditAction,
     DealStatus,
     DetectedDeal,
+    MessageRole,
+    MessageTarget,
     Negotiation,
+    NegotiationMessage,
     NegotiationStage,
     Order,
     OrderType,
@@ -106,6 +109,7 @@ async def get_lead_card(
         .options(
             selectinload(DetectedDeal.sell_order),
             selectinload(DetectedDeal.buy_order),
+            selectinload(DetectedDeal.negotiation),
         )
         .where(DetectedDeal.id == deal_id)
     )
@@ -159,6 +163,36 @@ async def get_lead_card(
         except (json.JSONDecodeError, TypeError):
             ai_draft_seller = deal.ai_draft_message
 
+    # Check which drafts have already been sent (by looking at NegotiationMessage)
+    seller_draft_sent = False
+    buyer_draft_sent = False
+    if deal.negotiation:
+        neg_id = deal.negotiation.id
+        seller_msg_count = await db.scalar(
+            select(func.count())
+            .select_from(NegotiationMessage)
+            .where(
+                NegotiationMessage.negotiation_id == neg_id,
+                NegotiationMessage.role == MessageRole.MANAGER,
+                NegotiationMessage.target == MessageTarget.SELLER,
+            )
+        )
+        buyer_msg_count = await db.scalar(
+            select(func.count())
+            .select_from(NegotiationMessage)
+            .where(
+                NegotiationMessage.negotiation_id == neg_id,
+                NegotiationMessage.role == MessageRole.MANAGER,
+                NegotiationMessage.target == MessageTarget.BUYER,
+            )
+        )
+        seller_draft_sent = (seller_msg_count or 0) > 0
+        buyer_draft_sent = (buyer_msg_count or 0) > 0
+
+    # Check contact availability
+    has_seller_contact = bool(deal.sell_order and deal.sell_order.sender_id)
+    has_buyer_contact = bool(deal.buyer_sender_id)
+
     return LeadCardResponse(
         deal_id=deal.id,
         product=deal.product,
@@ -170,6 +204,10 @@ async def get_lead_card(
         seller_city=deal.seller_city,
         ai_draft_seller=ai_draft_seller,
         ai_draft_buyer=ai_draft_buyer,
+        seller_draft_sent=seller_draft_sent,
+        buyer_draft_sent=buyer_draft_sent,
+        has_seller_contact=has_seller_contact,
+        has_buyer_contact=has_buyer_contact,
         market_context=market_context,
         created_at=deal.created_at,
         platform=deal.platform,
@@ -189,6 +227,8 @@ async def send_draft(
 
     If the deal isn't assigned yet, assigns it to this manager.
     Creates a Negotiation if none exists, then queues the message.
+    Saves the message to NegotiationMessage so it appears in chat history.
+    When both seller and buyer drafts are sent, auto-takes the deal.
     """
     result = await db.execute(
         select(DetectedDeal)
@@ -229,6 +269,7 @@ async def send_draft(
     deal.status = DealStatus.HANDED_TO_MANAGER
 
     # Determine recipient
+    target_enum = MessageTarget.SELLER if data.target == "seller" else MessageTarget.BUYER
     if data.target == "seller":
         if not deal.sell_order:
             raise HTTPException(
@@ -256,6 +297,16 @@ async def send_draft(
         db.add(negotiation)
         await db.flush()
 
+    # Save message to negotiation history (so it appears in chat)
+    neg_message = NegotiationMessage(
+        negotiation_id=negotiation.id,
+        role=MessageRole.MANAGER,
+        target=target_enum,
+        content=data.message,
+        sent_by_user_id=current_user.id,
+    )
+    db.add(neg_message)
+
     # Queue message for sending via Telegram
     outbox = OutboxMessage(
         recipient_id=recipient_id,
@@ -275,9 +326,30 @@ async def send_draft(
         ip_address=get_client_ip(request),
     )
 
+    await db.flush()
+
+    # Check which sides now have messages sent (to determine UI state)
+    other_target = MessageTarget.BUYER if data.target == "seller" else MessageTarget.SELLER
+    other_sent_count = await db.scalar(
+        select(func.count())
+        .select_from(NegotiationMessage)
+        .where(
+            NegotiationMessage.negotiation_id == negotiation.id,
+            NegotiationMessage.role == MessageRole.MANAGER,
+            NegotiationMessage.target == other_target,
+        )
+    )
+    other_side_sent = (other_sent_count or 0) > 0
+
     await db.commit()
 
-    return {"success": True, "message": "Драфт отправлен"}
+    return {
+        "success": True,
+        "message": "Драфт отправлен",
+        "seller_draft_sent": True if data.target == "seller" else other_side_sent,
+        "buyer_draft_sent": True if data.target == "buyer" else other_side_sent,
+        "both_sent": other_side_sent,  # True means both sides now have messages
+    }
 
 
 @router.post("/{deal_id}/skip")

@@ -19,6 +19,10 @@ class LeadCardResponse(BaseModel):
     seller_city: Optional[str] = None
     ai_draft_seller: Optional[str] = None
     ai_draft_buyer: Optional[str] = None
+    seller_draft_sent: bool = False  # Whether draft to seller has been sent
+    buyer_draft_sent: bool = False   # Whether draft to buyer has been sent
+    has_seller_contact: bool = True  # Whether seller contact is available
+    has_buyer_contact: bool = True   # Whether buyer contact is available
     market_context: Optional[Dict] = None  # Parsed JSON
     created_at: datetime
     platform: str = "telegram"

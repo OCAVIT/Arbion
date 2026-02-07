@@ -217,7 +217,7 @@
     background-color: var(--bg-card);
     border: 1px solid var(--border-color);
     border-radius: var(--border-radius-lg);
-    margin-bottom: 20px;
+    margin-bottom: 12px;
     overflow: hidden;
 }
 
@@ -284,6 +284,60 @@
     margin-top: 8px;
     font-size: 12px;
     color: var(--text-muted);
+}
+
+/* Draft actions row inside card */
+.draft-actions-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+/* Sent state */
+.draft-card.draft-sent {
+    border-color: var(--success);
+    background-color: rgba(16, 185, 129, 0.04);
+}
+
+.draft-sent-badge {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--success);
+    padding: 3px 10px;
+    border-radius: 12px;
+    background: var(--success-soft);
+}
+
+.draft-sent-body {
+    padding: 16px 20px;
+}
+
+.draft-sent-text {
+    color: var(--success);
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.draft-unavailable-text {
+    color: var(--text-muted);
+    font-size: 14px;
+    font-style: italic;
+}
+
+/* Hint bar */
+.lead-hint {
+    padding: 12px 16px;
+    border-radius: var(--border-radius);
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 12px;
+    text-align: center;
+}
+
+.lead-hint.success {
+    background: var(--success-soft);
+    color: var(--success);
+    border: 1px solid var(--success);
 }
 
 /* Action Buttons */
@@ -385,7 +439,6 @@
 <script>
 const dealId = {{ deal_id }};
 let leadData = null;
-let draftTarget = 'seller';
 
 document.addEventListener('DOMContentLoaded', loadLeadCard);
 
@@ -510,60 +563,104 @@ function renderLeadCard(data) {
         `;
     }
 
-    // AI Draft — separate seller/buyer drafts
+    // AI Draft — seller card
     const sellerDraft = data.ai_draft_seller || '';
     const buyerDraft = data.ai_draft_buyer || '';
+    const sellerSent = data.seller_draft_sent;
+    const buyerSent = data.buyer_draft_sent;
+    const hasSeller = data.has_seller_contact;
+    const hasBuyer = data.has_buyer_contact;
+
+    // Seller draft card
     html += `
-        <div class="draft-card">
+        <div class="draft-card ${sellerSent ? 'draft-sent' : ''}" id="sellerDraftCard">
             <div class="draft-card-header">
-                <h3>AI-драфт сообщения</h3>
-                <div class="draft-target-tabs">
-                    <button class="draft-target-tab active" onclick="switchDraftTarget('seller')">Продавцу</button>
-                    <button class="draft-target-tab" onclick="switchDraftTarget('buyer')">Покупателю</button>
+                <h3>Продавцу</h3>
+                ${sellerSent ? '<span class="draft-sent-badge">Отправлено</span>' : ''}
+            </div>
+            ${sellerSent ? `
+                <div class="draft-card-body draft-sent-body">
+                    <span class="draft-sent-text">Первое сообщение продавцу отправлено</span>
                 </div>
-            </div>
-            <div class="draft-card-body">
-                <textarea id="draftMessage" class="draft-textarea" placeholder="Напишите сообщение...">${escapeHtml(sellerDraft)}</textarea>
-                <span class="draft-hint">Отредактируйте текст перед отправкой или отправьте как есть</span>
-            </div>
+            ` : (hasSeller ? `
+                <div class="draft-card-body">
+                    <textarea id="sellerDraftMessage" class="draft-textarea" placeholder="Напишите сообщение продавцу...">${escapeHtml(sellerDraft)}</textarea>
+                    <div class="draft-actions-row">
+                        <button onclick="sendDraftTo('seller')" class="btn btn-success btn-sm" id="sendSellerBtn">Отправить продавцу</button>
+                    </div>
+                </div>
+            ` : `
+                <div class="draft-card-body draft-sent-body">
+                    <span class="draft-unavailable-text">Контакт продавца недоступен</span>
+                </div>
+            `)}
         </div>
     `;
 
-    // Actions
+    // Buyer draft card
     html += `
-        <div class="lead-actions">
-            <button onclick="sendDraft()" class="btn btn-success" id="sendDraftBtn">Отправить</button>
-            <button onclick="openSkipModal()" class="btn btn-outline">Пропустить</button>
+        <div class="draft-card ${buyerSent ? 'draft-sent' : ''}" id="buyerDraftCard">
+            <div class="draft-card-header">
+                <h3>Покупателю</h3>
+                ${buyerSent ? '<span class="draft-sent-badge">Отправлено</span>' : ''}
+            </div>
+            ${buyerSent ? `
+                <div class="draft-card-body draft-sent-body">
+                    <span class="draft-sent-text">Первое сообщение покупателю отправлено</span>
+                </div>
+            ` : (hasBuyer ? `
+                <div class="draft-card-body">
+                    <textarea id="buyerDraftMessage" class="draft-textarea" placeholder="Напишите сообщение покупателю...">${escapeHtml(buyerDraft)}</textarea>
+                    <div class="draft-actions-row">
+                        <button onclick="sendDraftTo('buyer')" class="btn btn-success btn-sm" id="sendBuyerBtn">Отправить покупателю</button>
+                    </div>
+                </div>
+            ` : `
+                <div class="draft-card-body draft-sent-body">
+                    <span class="draft-unavailable-text">Контакт покупателя недоступен</span>
+                </div>
+            `)}
         </div>
     `;
+
+    // Hint + skip/take actions
+    const oneSent = sellerSent !== buyerSent; // exactly one sent
+    const bothSent = sellerSent && buyerSent;
+    if (bothSent) {
+        html += `
+            <div class="lead-hint success">Оба сообщения отправлены — сделка взята в работу</div>
+            <div class="lead-actions">
+                <a href="/panel" class="btn btn-success">К списку сделок</a>
+            </div>
+        `;
+    } else {
+        html += `
+            <div class="lead-actions">
+                <button onclick="openSkipModal()" class="btn btn-outline" id="skipBtn">
+                    ${oneSent ? 'Пропустить вторую сторону и взять сделку' : 'Пропустить'}
+                </button>
+            </div>
+        `;
+    }
 
     html += `</div>`;
 
     document.getElementById('leadCard').innerHTML = html;
 }
 
-function switchDraftTarget(target) {
-    draftTarget = target;
-    document.querySelectorAll('.draft-target-tab').forEach(tab => {
-        tab.classList.toggle('active', tab.textContent.includes(target === 'seller' ? 'Продавцу' : 'Покупателю'));
-    });
-    // Swap textarea content to the selected target's draft
-    const textarea = document.getElementById('draftMessage');
-    if (textarea && leadData) {
-        textarea.value = target === 'seller'
-            ? (leadData.ai_draft_seller || '')
-            : (leadData.ai_draft_buyer || '');
-    }
-}
+async function sendDraftTo(target) {
+    const textareaId = target === 'seller' ? 'sellerDraftMessage' : 'buyerDraftMessage';
+    const btnId = target === 'seller' ? 'sendSellerBtn' : 'sendBuyerBtn';
+    const textarea = document.getElementById(textareaId);
+    const btn = document.getElementById(btnId);
 
-async function sendDraft() {
-    const message = document.getElementById('draftMessage').value.trim();
+    if (!textarea) return;
+    const message = textarea.value.trim();
     if (!message) {
         showNotification('Введите текст сообщения', 'error');
         return;
     }
 
-    const btn = document.getElementById('sendDraftBtn');
     btn.disabled = true;
     btn.textContent = 'Отправка...';
 
@@ -571,22 +668,30 @@ async function sendDraft() {
         const response = await fetch(`/panel/leads/${dealId}/send-draft`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message, target: draftTarget })
+            body: JSON.stringify({ message, target })
         });
 
         const data = await response.json();
 
         if (response.ok) {
             showNotification('Сообщение отправлено!', 'success');
-            setTimeout(() => { window.location.href = '/panel'; }, 1500);
+            if (data.both_sent) {
+                // Both sides sent — deal is auto-taken, redirect
+                showNotification('Оба сообщения отправлены — сделка взята!', 'success');
+                setTimeout(() => { window.location.href = '/panel'; }, 1500);
+            } else {
+                // Reload card to show updated state
+                setTimeout(() => loadLeadCard(), 500);
+            }
         } else {
             showNotification(data.detail || 'Ошибка отправки', 'error');
+            btn.disabled = false;
+            btn.textContent = target === 'seller' ? 'Отправить продавцу' : 'Отправить покупателю';
         }
     } catch (error) {
         showNotification('Ошибка сети', 'error');
-    } finally {
         btn.disabled = false;
-        btn.textContent = 'Отправить';
+        btn.textContent = target === 'seller' ? 'Отправить продавцу' : 'Отправить покупателю';
     }
 }
 
@@ -599,6 +704,16 @@ function closeSkipModal() {
 }
 
 async function confirmSkip() {
+    // If one draft was already sent, "skip" means just go to deal (it's already taken)
+    const oneDraftSent = leadData && (leadData.seller_draft_sent !== leadData.buyer_draft_sent);
+    if (oneDraftSent) {
+        closeSkipModal();
+        showNotification('Сделка взята в работу', 'success');
+        setTimeout(() => { window.location.href = '/panel'; }, 1000);
+        return;
+    }
+
+    // Otherwise — actually skip/lose the lead
     const reason = document.querySelector('input[name="skip_reason"]:checked')?.value || 'other';
 
     try {
