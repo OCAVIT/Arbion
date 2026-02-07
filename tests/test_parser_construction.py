@@ -22,6 +22,7 @@ os.environ.setdefault("TG_SESSION_STRING", "test")
 from src.services.message_handler import (
     detect_order_type,
     extract_price,
+    extract_price_unit,
     extract_product,
     extract_region,
     extract_volume,
@@ -47,7 +48,7 @@ class TestSellMessage1:
         product, niche = extract_product(self.text)
         assert product is not None
         assert "арматур" in product.lower()
-        assert niche == "construction"
+        assert niche == "стройматериалы"
 
     def test_price(self):
         price = extract_price(self.text)
@@ -76,7 +77,7 @@ class TestSellMessage2:
         product, niche = extract_product(self.text)
         assert product is not None
         assert "профнастил" in product.lower()
-        assert niche == "construction"
+        assert niche == "стройматериалы"
 
     def test_price(self):
         price = extract_price(self.text)
@@ -105,12 +106,17 @@ class TestSellMessage3:
         product, niche = extract_product(self.text)
         assert product is not None
         assert "цемент" in product.lower()
-        assert niche == "construction"
+        assert niche == "стройматериалы"
 
     def test_price(self):
         price = extract_price(self.text)
         assert price is not None
         assert price == Decimal("4200")
+
+    def test_unit_from_price(self):
+        """'4200/тн' should extract unit='тонна' via extract_price_unit."""
+        unit = extract_price_unit(self.text)
+        assert unit == "тонна"
 
     def test_region(self):
         region = extract_region(self.text)
@@ -129,7 +135,7 @@ class TestSellMessage4:
         product, niche = extract_product(self.text)
         assert product is not None
         assert "брус" in product.lower()
-        assert niche == "construction"
+        assert niche == "стройматериалы"
 
     def test_price(self):
         price = extract_price(self.text)
@@ -158,7 +164,7 @@ class TestSellMessage5:
         product, niche = extract_product(self.text)
         assert product is not None
         assert "щебень" in product.lower() or "щебен" in product.lower()
-        assert niche == "construction"
+        assert niche == "стройматериалы"
 
     def test_price(self):
         price = extract_price(self.text)
@@ -187,7 +193,7 @@ class TestBuyMessage1:
         product, niche = extract_product(self.text)
         assert product is not None
         assert "арматур" in product.lower()
-        assert niche == "construction"
+        assert niche == "стройматериалы"
 
     def test_volume(self):
         vol, unit = extract_volume(self.text)
@@ -211,7 +217,7 @@ class TestBuyMessage2:
         product, niche = extract_product(self.text)
         assert product is not None
         assert "профлист" in product.lower()
-        assert niche == "construction"
+        assert niche == "стройматериалы"
 
     def test_volume(self):
         vol, unit = extract_volume(self.text)
@@ -235,7 +241,7 @@ class TestBuyMessage3:
         product, niche = extract_product(self.text)
         assert product is not None
         assert "цемент" in product.lower()
-        assert niche == "construction"
+        assert niche == "стройматериалы"
 
     def test_volume(self):
         vol, unit = extract_volume(self.text)
@@ -259,7 +265,7 @@ class TestBuyMessage4:
         product, niche = extract_product(self.text)
         assert product is not None
         assert "газоб" in product.lower() or "газоблок" in product.lower()
-        assert niche == "construction"
+        assert niche == "стройматериалы"
 
     def test_volume(self):
         vol, unit = extract_volume(self.text)
@@ -398,3 +404,27 @@ class TestEdgeCases:
         """'от 20 тонн' — 20 should NOT be extracted as price (below 100 min)."""
         price = extract_price("от 20 тонн")
         assert price is None
+
+    def test_price_unit_4200_per_tn(self):
+        """'4200/тн' → unit='тонна'."""
+        assert extract_price_unit("4200/тн") == "тонна"
+
+    def test_price_unit_47000r_per_tn(self):
+        """'47000р/тн' → unit='тонна'."""
+        assert extract_price_unit("47000р/тн") == "тонна"
+
+    def test_price_unit_580r_per_m2(self):
+        """'580р/м²' → unit='м²'."""
+        assert extract_price_unit("580р/м²") == "м²"
+
+    def test_price_unit_12000_rub_per_m3(self):
+        """'12000 руб/м³' → unit='м³'."""
+        assert extract_price_unit("12000 руб/м³") == "м³"
+
+    def test_price_unit_1850_per_tn(self):
+        """'1850/тн' → unit='тонна'."""
+        assert extract_price_unit("1850/тн") == "тонна"
+
+    def test_price_unit_none_when_no_unit(self):
+        """No price-per-unit expression → None."""
+        assert extract_price_unit("просто цена 50000") is None

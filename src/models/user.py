@@ -94,7 +94,7 @@ class User(Base, TimestampMixin):
     niches: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
-        comment="JSON array of niches: [\"construction\", \"agriculture\"]",
+        comment="JSON array of niches: [\"стройматериалы\", \"сельхоз\"]",
     )
     level: Mapped[str] = mapped_column(
         String(20),

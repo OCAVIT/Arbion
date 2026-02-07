@@ -44,7 +44,7 @@ class SkipLeadRequest(BaseModel):
 
 class CreateLeadRequest(BaseModel):
     product: str = Field(..., min_length=1, max_length=255)
-    niche: Optional[str] = Field(None, pattern="^(construction|agriculture|fmcg|other)$")
+    niche: Optional[str] = Field(None, pattern="^(стройматериалы|сельхоз|fmcg|other)$")
     sell_price: Decimal = Field(..., gt=0)
     buy_price: Optional[Decimal] = Field(None, gt=0)
     region: Optional[str] = Field(None, max_length=100)
@@ -122,7 +122,7 @@ class TestCreateLeadRequest:
     def test_valid_full(self):
         req = CreateLeadRequest(
             product="цемент М500",
-            niche="construction",
+            niche="стройматериалы",
             sell_price=Decimal("5500"),
             buy_price=Decimal("6000"),
             region="Москва",
@@ -131,7 +131,7 @@ class TestCreateLeadRequest:
             contact_info="+79991234567",
             notes="Срочная поставка",
         )
-        assert req.niche == "construction"
+        assert req.niche == "стройматериалы"
         assert req.buy_price == Decimal("6000")
 
     def test_invalid_niche_rejected(self):
@@ -192,7 +192,7 @@ class TestLeadCardResponse:
         card = LeadCardResponse(
             deal_id=1,
             product="арматура А500С",
-            niche="construction",
+            niche="стройматериалы",
             sell_price=47000.0,
             estimated_margin=10.6,
             volume="20 тонн",
@@ -204,7 +204,7 @@ class TestLeadCardResponse:
             platform="telegram",
         )
         assert card.deal_id == 1
-        assert card.niche == "construction"
+        assert card.niche == "стройматериалы"
         assert card.market_context["avg_price"] == 48500
 
     def test_minimal(self):
@@ -270,7 +270,7 @@ class TestNicheAnalyticsLogic:
     def test_group_by_niche(self):
         """Verify grouping logic works for niche analytics."""
         raw_rows = [
-            SimpleNamespace(niche="construction", deals=15, won_deals=10, revenue=450000, avg_margin=30000),
+            SimpleNamespace(niche="стройматериалы", deals=15, won_deals=10, revenue=450000, avg_margin=30000),
             SimpleNamespace(niche="agriculture", deals=5, won_deals=2, revenue=100000, avg_margin=20000),
             SimpleNamespace(niche=None, deals=3, won_deals=0, revenue=0, avg_margin=0),
         ]
@@ -285,9 +285,9 @@ class TestNicheAnalyticsLogic:
                 "avg_margin": round(float(row.avg_margin or 0), 2),
             }
 
-        assert "construction" in analytics
-        assert analytics["construction"]["deals"] == 15
-        assert analytics["construction"]["revenue"] == 450000.0
+        assert "стройматериалы" in analytics
+        assert analytics["стройматериалы"]["deals"] == 15
+        assert analytics["стройматериалы"]["revenue"] == 450000.0
         assert "agriculture" in analytics
         assert analytics["unknown"]["deals"] == 3
 

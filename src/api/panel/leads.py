@@ -65,7 +65,7 @@ class CreateLeadRequest(BaseModel):
     """Manager creates own lead (lead_source=manager)."""
 
     product: str = Field(..., min_length=1, max_length=255)
-    niche: Optional[str] = Field(None, pattern="^(construction|agriculture|fmcg|other)$")
+    niche: Optional[str] = Field(None, pattern="^(стройматериалы|сельхоз|fmcg|other)$")
     sell_price: Decimal = Field(..., gt=0)
     buy_price: Optional[Decimal] = Field(None, gt=0)
     region: Optional[str] = Field(None, max_length=100)

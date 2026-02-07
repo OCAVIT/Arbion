@@ -33,7 +33,7 @@ async def niche_analytics(
     Analytics grouped by niche.
 
     Returns: {
-        "construction": { "deals": 15, "revenue": 450000, "avg_margin": 30000 },
+        "стройматериалы": { "deals": 15, "revenue": 450000, "avg_margin": 30000 },
         ...
     }
     """

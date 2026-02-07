@@ -127,7 +127,7 @@ class TestBuildMarketContext:
     async def test_no_data_returns_empty(self, db_session):
         """With no orders in DB, return empty context."""
         copilot = AICopilot()
-        ctx = await copilot.build_market_context("арматура", "construction", db_session)
+        ctx = await copilot.build_market_context("арматура", "стройматериалы", db_session)
         assert ctx["sources_count"] == 0
         assert ctx["avg_price"] is None
 
@@ -146,14 +146,14 @@ class TestBuildMarketContext:
                 product="арматура а500с",
                 price=Decimal(str(price)),
                 raw_text=f"продам арматуру {price}",
-                niche="construction",
+                niche="стройматериалы",
                 platform="telegram",
             )
             db_session.add(order)
         await db_session.flush()
 
         copilot = AICopilot()
-        ctx = await copilot.build_market_context("арматура", "construction", db_session)
+        ctx = await copilot.build_market_context("арматура", "стройматериалы", db_session)
         assert ctx["sources_count"] == 3
         assert ctx["min_seen"] == 45000
         assert ctx["max_seen"] == 50000

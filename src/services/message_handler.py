@@ -314,7 +314,7 @@ def extract_product(text: str) -> tuple[str | None, str | None]:
     """Извлекает продукт и нишу из текста.
 
     Returns:
-        (product_name, niche) — например ('арматура А500С', 'construction')
+        (product_name, niche) — например ('арматура А500С', 'стройматериалы')
     """
     text_lower = text.lower()
 
@@ -324,14 +324,14 @@ def extract_product(text: str) -> tuple[str | None, str | None]:
         if match:
             # Извлечь полное описание (включая марку/размер)
             full_product = match.group(0).strip()
-            return (full_product or product_name, 'construction')
+            return (full_product or product_name, 'стройматериалы')
 
     # Потом агро (когда включим)
     # for pattern, product_name in AGRICULTURE_PRODUCTS.items():
     #     match = re.search(pattern, text_lower, re.IGNORECASE)
     #     if match:
     #         full_product = match.group(0).strip()
-    #         return (full_product or product_name, 'agriculture')
+    #         return (full_product or product_name, 'сельхоз')
 
     # Fallback: извлекаем текст после ключевого слова купли/продажи
     all_keywords = BUY_KEYWORDS + SELL_KEYWORDS
@@ -441,6 +441,37 @@ def extract_quantity(text: str) -> Optional[str]:
             qty = match.group(1) or match.group(2)
             if qty and int(qty) > 0:
                 return f"{qty} шт"
+    return None
+
+
+def extract_price_unit(text: str) -> str | None:
+    """Извлекает единицу измерения из выражения цены-за-единицу.
+
+    Примеры:
+        '4200/тн' → 'тонна'
+        '47000р/тн' → 'тонна'
+        '580р/м²' → 'м²'
+        '12000 руб/м³' → 'м³'
+    """
+    PRICE_UNIT_PATTERNS = [
+        (r'\d\s*/\s*(тонн[аыу]?|тн|т)\b', 'тонна'),
+        (r'(?:руб|₽|р)\s*/?\s*(тонн[аыу]?|тн|т)\b', 'тонна'),
+        (r'\d\s*/\s*(м[²2]|кв\.?\s*м)', 'м²'),
+        (r'(?:руб|₽|р)\s*/?\s*(м[²2]|кв\.?\s*м)', 'м²'),
+        (r'\d\s*/\s*(м[³3]|куб\.?\s*м)', 'м³'),
+        (r'(?:руб|₽|р)\s*/?\s*(м[³3]|куб\.?\s*м)', 'м³'),
+        (r'\d\s*/\s*(шт|штук)', 'шт'),
+        (r'(?:руб|₽|р)\s*/?\s*(шт|штук)', 'шт'),
+        (r'\d\s*/\s*(рулон)', 'рулон'),
+        (r'\d\s*/\s*(лист)', 'лист'),
+        (r'\d\s*/\s*(мешок|мешк)', 'мешок'),
+        (r'\d\s*/\s*(поддон)', 'поддон'),
+        (r'\d\s*/\s*(вагон)', 'вагон'),
+    ]
+    text_lower = text.lower()
+    for pattern, unit in PRICE_UNIT_PATTERNS:
+        if re.search(pattern, text_lower):
+            return unit
     return None
 
 
@@ -921,6 +952,10 @@ async def _process_message_internal(event, telegram_service, raw_text: str = Non
                     region = extract_region(raw_text)
                     volume, unit = extract_volume(raw_text)
                     quantity_str = extract_quantity(raw_text)
+
+                    # Если unit не найден через volume — пробуем из цены-за-единицу
+                    if not unit:
+                        unit = extract_price_unit(raw_text)
 
                     # Если продукт не найден — используем fallback
                     if not product:
