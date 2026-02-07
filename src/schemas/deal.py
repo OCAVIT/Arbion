@@ -272,6 +272,9 @@ class MessageResponse(BaseModel):
     created_at: datetime
     media_type: Optional[str] = None  # "photo", "video", "document", "sticker"
     file_name: Optional[str] = None  # Original filename for documents
+    reply_to_message_id: Optional[int] = None  # Telegram msg ID this replies to
+    reply_to_content: Optional[str] = None  # Truncated content of replied message
+    reply_to_sender_name: Optional[str] = None  # Who sent the replied message
 
     model_config = {"from_attributes": True}
 
@@ -281,6 +284,7 @@ class MessageResponse(BaseModel):
         message,
         role: str,
         sender_name: Optional[str] = None,
+        reply_info: Optional[dict] = None,
     ) -> "MessageResponse":
         """
         Create response from message model.
@@ -289,6 +293,7 @@ class MessageResponse(BaseModel):
             message: NegotiationMessage model
             role: User role for masking ("owner" or "manager")
             sender_name: Display name for the sender
+            reply_info: Optional dict with reply_to_content and reply_to_sender_name
 
         For managers, sensitive content is masked.
         """
@@ -318,6 +323,9 @@ class MessageResponse(BaseModel):
             created_at=message.created_at,
             media_type=getattr(message, 'media_type', None),
             file_name=getattr(message, 'file_name', None),
+            reply_to_message_id=getattr(message, 'reply_to_message_id', None),
+            reply_to_content=reply_info.get('content') if reply_info else None,
+            reply_to_sender_name=reply_info.get('sender_name') if reply_info else None,
         )
 
 

@@ -130,7 +130,20 @@
                 <div class="chat-messages" id="sellerMessages">
                     <div class="loading">Загрузка...</div>
                 </div>
+                <div class="reply-preview" id="sellerReplyPreview" style="display:none">
+                    <div class="reply-preview-content">
+                        <span class="reply-preview-sender" id="sellerReplySender"></span>
+                        <span class="reply-preview-text" id="sellerReplyText"></span>
+                    </div>
+                    <button class="reply-preview-close" onclick="cancelReply('seller')">&times;</button>
+                </div>
+                <div class="file-preview" id="sellerFilePreview" style="display:none">
+                    <span class="file-preview-name" id="sellerFileName"></span>
+                    <button class="file-preview-remove" onclick="clearFileSelection('seller')">&times;</button>
+                </div>
                 <div class="chat-input">
+                    <button onclick="document.getElementById('sellerFileInput').click()" class="btn-attach" title="Прикрепить файл">&#128206;</button>
+                    <input type="file" id="sellerFileInput" style="display:none" onchange="handleFileSelect('seller', this)" accept=".jpg,.jpeg,.png,.gif,.bmp,.webp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar,.7z">
                     <input type="text" id="sellerMessageInput" placeholder="Написать продавцу...">
                     <button onclick="sendMessage('seller')" class="btn btn-primary">
                         <span class="btn-text">Отправить</span>
@@ -150,7 +163,20 @@
                 <div class="chat-messages" id="buyerMessages">
                     <div class="loading">Загрузка...</div>
                 </div>
+                <div class="reply-preview" id="buyerReplyPreview" style="display:none">
+                    <div class="reply-preview-content">
+                        <span class="reply-preview-sender" id="buyerReplySender"></span>
+                        <span class="reply-preview-text" id="buyerReplyText"></span>
+                    </div>
+                    <button class="reply-preview-close" onclick="cancelReply('buyer')">&times;</button>
+                </div>
+                <div class="file-preview" id="buyerFilePreview" style="display:none">
+                    <span class="file-preview-name" id="buyerFileName"></span>
+                    <button class="file-preview-remove" onclick="clearFileSelection('buyer')">&times;</button>
+                </div>
                 <div class="chat-input">
+                    <button onclick="document.getElementById('buyerFileInput').click()" class="btn-attach" title="Прикрепить файл">&#128206;</button>
+                    <input type="file" id="buyerFileInput" style="display:none" onchange="handleFileSelect('buyer', this)" accept=".jpg,.jpeg,.png,.gif,.bmp,.webp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar,.7z">
                     <input type="text" id="buyerMessageInput" placeholder="Написать покупателю...">
                     <button onclick="sendMessage('buyer')" class="btn btn-primary">
                         <span class="btn-text">Отправить</span>
@@ -160,6 +186,11 @@
             </div>
         </div>
     </div>
+</div>
+
+<!-- Fullscreen media overlay -->
+<div id="mediaOverlay" class="media-overlay" onclick="closeFullscreen()">
+    <img id="mediaOverlayImg" src="" alt="Полный размер">
 </div>
 
 <style>
@@ -273,7 +304,7 @@
     flex-shrink: 0;
 }
 
-.chat-input input {
+.chat-input input[type="text"] {
     flex: 1;
     min-width: 0;
 }
@@ -285,6 +316,151 @@
 
 .chat-input .btn-icon {
     display: none;
+}
+
+/* File attach button */
+.btn-attach {
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 8px;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+    flex-shrink: 0;
+}
+
+.btn-attach:hover {
+    opacity: 1;
+}
+
+/* File preview bar */
+.file-preview {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    background: var(--bg-hover, rgba(255,255,255,0.05));
+    border-top: 1px solid var(--border-color);
+    font-size: 13px;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.file-preview-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+}
+
+.file-preview-remove {
+    background: none;
+    border: none;
+    color: var(--danger, #ef4444);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 0 4px;
+    flex-shrink: 0;
+}
+
+/* Reply preview bar */
+.reply-preview {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    background: rgba(99, 102, 241, 0.1);
+    border-left: 3px solid var(--accent, #6366f1);
+    border-top: 1px solid var(--border-color);
+    font-size: 13px;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.reply-preview-content {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.reply-preview-sender {
+    font-weight: 600;
+    font-size: 12px;
+    display: block;
+    color: var(--accent, #6366f1);
+}
+
+.reply-preview-text {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.reply-preview-close {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 0 4px;
+    flex-shrink: 0;
+}
+
+/* Reply reference in messages */
+.message-reply-ref {
+    background: rgba(255, 255, 255, 0.08);
+    border-left: 2px solid rgba(255, 255, 255, 0.3);
+    padding: 4px 8px;
+    margin-bottom: 6px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.message-reply-ref:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.message-reply-ref .reply-ref-sender {
+    font-weight: 600;
+    opacity: 0.9;
+}
+
+.message-reply-ref .reply-ref-text {
+    opacity: 0.7;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+    max-width: 250px;
+}
+
+/* Reply button */
+.message-actions {
+    display: flex;
+    justify-content: flex-start;
+    margin-top: 4px;
+}
+
+.btn-reply {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 11px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.btn-reply:hover {
+    color: rgba(255, 255, 255, 0.8);
+    background: rgba(255, 255, 255, 0.08);
 }
 
 /* Messages */
@@ -334,6 +510,72 @@
 .message-content {
     white-space: pre-wrap;
     line-height: 1.4;
+}
+
+/* Media in messages */
+.media-photo {
+    max-width: 100%;
+    max-height: 300px;
+    border-radius: 8px;
+    cursor: pointer;
+    margin-top: 4px;
+    display: block;
+}
+
+.media-video {
+    max-width: 100%;
+    max-height: 300px;
+    border-radius: 8px;
+    margin-top: 4px;
+    display: block;
+}
+
+.media-sticker {
+    max-width: 150px;
+    max-height: 150px;
+    display: block;
+}
+
+.media-doc-link {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 8px 12px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 8px;
+    color: #93c5fd;
+    text-decoration: none;
+    font-size: 13px;
+    transition: background 0.2s;
+}
+
+.message-manager .media-doc-link {
+    color: #e0d4ff;
+}
+
+.media-doc-link:hover {
+    background: rgba(255,255,255,0.18);
+}
+
+/* Fullscreen overlay */
+.media-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    z-index: 9999;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+}
+
+.media-overlay img {
+    max-width: 95%;
+    max-height: 95%;
+    object-fit: contain;
+    border-radius: 4px;
 }
 
 /* Empty/Loading states */
@@ -473,6 +715,8 @@
 const dealId = {{ deal_id }};
 let refreshInterval;
 let activeChat = 'seller';
+let selectedFiles = { seller: null, buyer: null };
+let replyTo = { seller: null, buyer: null };
 
 document.addEventListener('DOMContentLoaded', () => {
     loadDeal();
@@ -535,17 +779,17 @@ async function loadMessages() {
     const data = await response.json();
 
     // Render seller messages
-    renderMessages('sellerMessages', data.seller_messages || []);
+    renderMessages('sellerMessages', data.seller_messages || [], 'seller');
     document.getElementById('sellerCount').textContent = `${(data.seller_messages || []).length} сообщений`;
     document.getElementById('sellerBadge').textContent = (data.seller_messages || []).length;
 
     // Render buyer messages
-    renderMessages('buyerMessages', data.buyer_messages || []);
+    renderMessages('buyerMessages', data.buyer_messages || [], 'buyer');
     document.getElementById('buyerCount').textContent = `${(data.buyer_messages || []).length} сообщений`;
     document.getElementById('buyerBadge').textContent = (data.buyer_messages || []).length;
 }
 
-function renderMessages(containerId, messages) {
+function renderMessages(containerId, messages, chatTarget) {
     const container = document.getElementById(containerId);
 
     if (messages.length === 0) {
@@ -555,19 +799,150 @@ function renderMessages(containerId, messages) {
 
     const wasScrolledToBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 50;
 
-    container.innerHTML = messages.map(msg => `
-        <div class="message message-${msg.role}">
-            <div class="message-header">
-                <span class="message-sender">${escapeHtml(msg.sender_name)}</span>
-                <span class="message-time">${formatTime(msg.created_at)}</span>
+    container.innerHTML = messages.map(msg => {
+        const replyRefHtml = renderReplyRef(msg);
+        const isCounterparty = msg.role === 'seller' || msg.role === 'buyer';
+        const replyBtnHtml = isCounterparty
+            ? `<div class="message-actions"><button class="btn-reply" onclick="setReply('${chatTarget}', ${msg.id}, '${escapeAttr(msg.sender_name)}', '${escapeAttr(truncate(msg.content, 60))}')">&#8617; Ответить</button></div>`
+            : '';
+        return `
+            <div class="message message-${msg.role}" data-msg-id="${msg.id}">
+                ${replyRefHtml}
+                <div class="message-header">
+                    <span class="message-sender">${escapeHtml(msg.sender_name)}</span>
+                    <span class="message-time">${formatTime(msg.created_at)}</span>
+                </div>
+                <div class="message-content">${renderMessageContent(msg)}</div>
+                ${replyBtnHtml}
             </div>
-            <div class="message-content">${escapeHtml(msg.content)}</div>
-        </div>
-    `).join('');
+        `;
+    }).join('');
 
-    // Auto-scroll to bottom if was at bottom
     if (wasScrolledToBottom) {
         container.scrollTop = container.scrollHeight;
+    }
+}
+
+function renderReplyRef(msg) {
+    if (!msg.reply_to_sender_name || !msg.reply_to_content) return '';
+    const content = msg.reply_to_content.replace(/\[фото\]|\[видео\]|\[документ\]/, function(m) {
+        return {'[фото]': 'Фото', '[видео]': 'Видео', '[документ]': 'Документ'}[m] || m;
+    });
+    return `<div class="message-reply-ref">
+        <span class="reply-ref-sender">${escapeHtml(msg.reply_to_sender_name)}</span>
+        <span class="reply-ref-text">${escapeHtml(content)}</span>
+    </div>`;
+}
+
+function renderMessageContent(msg) {
+    const mediaUrl = `/admin/deals/${dealId}/media/${msg.id}`;
+
+    if (msg.media_type === 'photo') {
+        const caption = (msg.content && msg.content !== '[фото]')
+            ? `<div style="margin-bottom:4px">${escapeHtml(msg.content)}</div>` : '';
+        return caption + `<img src="${mediaUrl}" loading="lazy" class="media-photo" onclick="openFullscreen(this.src)" alt="Фото">`;
+    }
+    if (msg.media_type === 'video') {
+        const caption = (msg.content && msg.content !== '[видео]')
+            ? `<div style="margin-bottom:4px">${escapeHtml(msg.content)}</div>` : '';
+        return caption + `<video controls preload="none" class="media-video"><source src="${mediaUrl}" type="video/mp4"></video>`;
+    }
+    if (msg.media_type === 'document') {
+        const isPlaceholder = !msg.content || msg.content === '[документ]' || msg.content.startsWith('[документ:') || msg.content.startsWith('[');
+        const caption = !isPlaceholder
+            ? `<div style="margin-bottom:4px">${escapeHtml(msg.content)}</div>` : '';
+        const docName = msg.file_name || 'Скачать документ';
+        const ext = docName.includes('.') ? docName.split('.').pop().toLowerCase() : '';
+        const icons = {'pdf': '\uD83D\uDCC4', 'doc': '\uD83D\uDCC3', 'docx': '\uD83D\uDCC3', 'xls': '\uD83D\uDCCA', 'xlsx': '\uD83D\uDCCA', 'zip': '\uD83D\uDCE6', 'rar': '\uD83D\uDCE6'};
+        const icon = icons[ext] || '\uD83D\uDCCE';
+        return caption + `<a href="${mediaUrl}" target="_blank" class="media-doc-link">${icon} ${escapeHtml(docName)}</a>`;
+    }
+    if (msg.media_type === 'sticker') {
+        return `<img src="${mediaUrl}" loading="lazy" class="media-sticker" alt="Стикер">`;
+    }
+    return escapeHtml(msg.content);
+}
+
+// Reply functionality
+function setReply(target, msgId, senderName, text) {
+    replyTo[target] = { id: msgId, sender: senderName, text: text };
+    document.getElementById(`${target}ReplyPreview`).style.display = 'flex';
+    document.getElementById(`${target}ReplySender`).textContent = senderName;
+    document.getElementById(`${target}ReplyText`).textContent = text;
+    document.getElementById(`${target}MessageInput`).focus();
+}
+
+function cancelReply(target) {
+    replyTo[target] = null;
+    document.getElementById(`${target}ReplyPreview`).style.display = 'none';
+}
+
+// File upload functionality
+function handleFileSelect(target, input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    if (file.size > 50 * 1024 * 1024) {
+        alert('Файл слишком большой (макс. 50 МБ)');
+        input.value = '';
+        return;
+    }
+
+    selectedFiles[target] = file;
+    const preview = document.getElementById(`${target}FilePreview`);
+    const nameEl = document.getElementById(`${target}FileName`);
+    nameEl.textContent = `\uD83D\uDCCE ${file.name} (${formatFileSize(file.size)})`;
+    preview.style.display = 'flex';
+}
+
+function clearFileSelection(target) {
+    selectedFiles[target] = null;
+    document.getElementById(`${target}FileInput`).value = '';
+    document.getElementById(`${target}FilePreview`).style.display = 'none';
+}
+
+function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' Б';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' КБ';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' МБ';
+}
+
+async function sendFileMessage(target) {
+    const file = selectedFiles[target];
+    if (!file) return;
+
+    const inputId = target === 'seller' ? 'sellerMessageInput' : 'buyerMessageInput';
+    const input = document.getElementById(inputId);
+    const caption = input.value.trim();
+
+    const chatInput = input.closest('.chat-input');
+    const btn = chatInput.querySelector('.btn-primary');
+    btn.disabled = true;
+
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('target', target);
+        formData.append('caption', caption);
+
+        const response = await fetch(`/admin/deals/${dealId}/send-file`, {
+            method: 'POST',
+            body: formData,
+        });
+
+        if (response.ok) {
+            clearFileSelection(target);
+            cancelReply(target);
+            input.value = '';
+            loadMessages();
+        } else {
+            const data = await response.json();
+            alert(data.detail || 'Ошибка отправки файла');
+        }
+    } catch (e) {
+        alert('Ошибка сети при отправке файла');
+    } finally {
+        btn.disabled = false;
     }
 }
 
@@ -597,12 +972,18 @@ async function assignManager() {
 }
 
 async function sendMessage(target) {
+    // If file is selected, send file instead
+    if (selectedFiles[target]) {
+        return sendFileMessage(target);
+    }
+
     const inputId = target === 'seller' ? 'sellerMessageInput' : 'buyerMessageInput';
     const input = document.getElementById(inputId);
     const content = input.value.trim();
     if (!content) return;
 
-    const btn = input.nextElementSibling;
+    const chatInput = input.closest('.chat-input');
+    const btn = chatInput.querySelector('.btn-primary');
     btn.disabled = true;
 
     try {
@@ -613,6 +994,7 @@ async function sendMessage(target) {
         });
 
         input.value = '';
+        cancelReply(target);
         loadMessages();
     } finally {
         btn.disabled = false;
@@ -654,6 +1036,17 @@ function switchChat(chat) {
     document.getElementById('buyerChatCard').classList.toggle('active', chat === 'buyer');
 }
 
+function openFullscreen(src) {
+    const overlay = document.getElementById('mediaOverlay');
+    const img = document.getElementById('mediaOverlayImg');
+    img.src = src;
+    overlay.style.display = 'flex';
+}
+
+function closeFullscreen() {
+    document.getElementById('mediaOverlay').style.display = 'none';
+}
+
 function formatMoney(value) {
     return new Intl.NumberFormat('ru-RU', {
         style: 'currency',
@@ -678,6 +1071,15 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function escapeAttr(text) {
+    return text.replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/\n/g, ' ');
+}
+
+function truncate(text, len) {
+    if (!text) return '';
+    return text.length > len ? text.substring(0, len) + '...' : text;
 }
 
 // Handle Enter key for sending messages

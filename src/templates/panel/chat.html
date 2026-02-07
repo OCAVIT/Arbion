@@ -39,6 +39,13 @@
             <div class="chat-messages" id="sellerMessages">
                 <div class="loading">Загрузка...</div>
             </div>
+            <div class="reply-preview" id="sellerReplyPreview" style="display:none">
+                <div class="reply-preview-content">
+                    <span class="reply-preview-sender" id="sellerReplySender"></span>
+                    <span class="reply-preview-text" id="sellerReplyText"></span>
+                </div>
+                <button class="reply-preview-close" onclick="cancelReply('seller')">&times;</button>
+            </div>
             <div class="file-preview" id="sellerFilePreview" style="display:none">
                 <span class="file-preview-name" id="sellerFileName"></span>
                 <button class="file-preview-remove" onclick="clearFileSelection('seller')">&times;</button>
@@ -58,6 +65,13 @@
         <div class="chat-panel" id="buyerChat">
             <div class="chat-messages" id="buyerMessages">
                 <div class="loading">Загрузка...</div>
+            </div>
+            <div class="reply-preview" id="buyerReplyPreview" style="display:none">
+                <div class="reply-preview-content">
+                    <span class="reply-preview-sender" id="buyerReplySender"></span>
+                    <span class="reply-preview-text" id="buyerReplyText"></span>
+                </div>
+                <button class="reply-preview-close" onclick="cancelReply('buyer')">&times;</button>
             </div>
             <div class="file-preview" id="buyerFilePreview" style="display:none">
                 <span class="file-preview-name" id="buyerFileName"></span>
@@ -405,14 +419,116 @@
     padding: 8px 12px;
     background: rgba(255,255,255,0.08);
     border-radius: 8px;
-    color: var(--success);
+    color: #93c5fd;
     text-decoration: none;
     font-size: 13px;
     transition: background 0.2s;
 }
 
+.message-manager .media-doc-link {
+    color: #bbf7d0;
+}
+
 .media-doc-link:hover {
     background: rgba(255,255,255,0.15);
+}
+
+/* Reply reference in messages */
+.message-reply-ref {
+    background: rgba(255, 255, 255, 0.08);
+    border-left: 2px solid rgba(255, 255, 255, 0.3);
+    padding: 4px 8px;
+    margin-bottom: 6px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.message-reply-ref:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.message-reply-ref .reply-ref-sender {
+    font-weight: 600;
+    opacity: 0.9;
+}
+
+.message-reply-ref .reply-ref-text {
+    opacity: 0.7;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+    max-width: 250px;
+}
+
+/* Reply button */
+.message-actions {
+    display: flex;
+    justify-content: flex-start;
+    margin-top: 4px;
+}
+
+.btn-reply {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 11px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.btn-reply:hover {
+    color: rgba(255, 255, 255, 0.8);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* Reply preview bar */
+.reply-preview {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    background: rgba(16, 185, 129, 0.1);
+    border-left: 3px solid var(--success, #10b981);
+    border-top: 1px solid var(--border-color);
+    font-size: 13px;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.reply-preview-content {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.reply-preview-sender {
+    font-weight: 600;
+    font-size: 12px;
+    display: block;
+    color: var(--success, #10b981);
+}
+
+.reply-preview-text {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.reply-preview-close {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 0 4px;
+    flex-shrink: 0;
 }
 
 /* File attach button */
@@ -638,6 +754,7 @@ async function loadMessages() {
 
 function renderMessages(containerId, messages) {
     const container = document.getElementById(containerId);
+    const chatTarget = containerId === 'sellerMessages' ? 'seller' : 'buyer';
 
     if (messages.length === 0) {
         container.innerHTML = '<div class="empty">Нет сообщений</div>';
@@ -646,19 +763,63 @@ function renderMessages(containerId, messages) {
 
     const wasScrolledToBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 50;
 
-    container.innerHTML = messages.map(msg => `
-        <div class="message message-${msg.role}">
-            <div class="message-header">
-                <span class="message-sender">${escapeHtml(msg.sender_name)}</span>
-                <span class="message-time">${formatTime(msg.created_at)}</span>
+    container.innerHTML = messages.map(msg => {
+        const replyRefHtml = renderReplyRef(msg);
+        const isCounterparty = msg.role === 'seller' || msg.role === 'buyer';
+        const replyBtnHtml = isCounterparty
+            ? `<div class="message-actions"><button class="btn-reply" onclick="setReply('${chatTarget}', ${msg.id}, '${escapeAttr(msg.sender_name)}', '${escapeAttr(truncate(msg.content, 60))}')">&#8617; Ответить</button></div>`
+            : '';
+        return `
+            <div class="message message-${msg.role}" data-msg-id="${msg.id}">
+                ${replyRefHtml}
+                <div class="message-header">
+                    <span class="message-sender">${escapeHtml(msg.sender_name)}</span>
+                    <span class="message-time">${formatTime(msg.created_at)}</span>
+                </div>
+                <div class="message-content">${renderMessageContent(msg)}</div>
+                ${replyBtnHtml}
             </div>
-            <div class="message-content">${renderMessageContent(msg)}</div>
-        </div>
-    `).join('');
+        `;
+    }).join('');
 
     if (wasScrolledToBottom) {
         container.scrollTop = container.scrollHeight;
     }
+}
+
+function renderReplyRef(msg) {
+    if (!msg.reply_to_sender_name || !msg.reply_to_content) return '';
+    const content = msg.reply_to_content.replace(/\[фото\]|\[видео\]|\[документ\]/, function(m) {
+        return {'[фото]': 'Фото', '[видео]': 'Видео', '[документ]': 'Документ'}[m] || m;
+    });
+    return `<div class="message-reply-ref">
+        <span class="reply-ref-sender">${escapeHtml(msg.reply_to_sender_name)}</span>
+        <span class="reply-ref-text">${escapeHtml(content)}</span>
+    </div>`;
+}
+
+let replyTo = { seller: null, buyer: null };
+
+function setReply(target, msgId, senderName, text) {
+    replyTo[target] = { id: msgId, sender: senderName, text: text };
+    document.getElementById(`${target}ReplyPreview`).style.display = 'flex';
+    document.getElementById(`${target}ReplySender`).textContent = senderName;
+    document.getElementById(`${target}ReplyText`).textContent = text;
+    document.getElementById(`${target}MessageInput`).focus();
+}
+
+function cancelReply(target) {
+    replyTo[target] = null;
+    document.getElementById(`${target}ReplyPreview`).style.display = 'none';
+}
+
+function escapeAttr(text) {
+    return text.replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/\n/g, ' ');
+}
+
+function truncate(text, len) {
+    if (!text) return '';
+    return text.length > len ? text.substring(0, len) + '...' : text;
 }
 
 let selectedFiles = { seller: null, buyer: null };
@@ -718,6 +879,7 @@ async function sendFileMessage(target) {
 
         if (response.ok) {
             clearFileSelection(target);
+            cancelReply(target);
             input.value = '';
             loadMessages();
         } else {
@@ -757,6 +919,7 @@ async function sendMessage(target) {
 
         if (response.ok) {
             input.value = '';
+            cancelReply(target);
             loadMessages();
         } else {
             const data = await response.json();

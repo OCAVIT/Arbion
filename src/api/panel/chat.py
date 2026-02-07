@@ -152,11 +152,39 @@ async def get_messages(
     msg_result = await db.execute(query)
     messages = msg_result.scalars().all()
 
+    # Build telegram_message_id -> message lookup for reply resolution
+    tg_id_to_msg = {}
+    for msg in messages:
+        if msg.telegram_message_id:
+            tg_id_to_msg[msg.telegram_message_id] = msg
+
+    def _get_reply_info(msg):
+        if not msg.reply_to_message_id:
+            return None
+        original = tg_id_to_msg.get(msg.reply_to_message_id)
+        if not original:
+            return None
+        if original.role == MessageRole.SELLER:
+            name = "Продавец"
+        elif original.role == MessageRole.BUYER:
+            name = "Покупатель"
+        elif original.role == MessageRole.MANAGER:
+            name = original.sent_by.display_name if original.sent_by else "Менеджер"
+        elif original.role == MessageRole.AI:
+            name = "Ассистент"
+        else:
+            name = "Система"
+        content = original.content or ""
+        if len(content) > 100:
+            content = content[:100] + "..."
+        return {"content": content, "sender_name": name}
+
     all_messages = [
         MessageResponse.from_message(
             msg,
             role="manager",  # This triggers masking
             sender_name=msg.sent_by.display_name if msg.sent_by else None,
+            reply_info=_get_reply_info(msg),
         )
         for msg in messages
     ]
