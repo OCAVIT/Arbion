@@ -29,43 +29,110 @@ logger = logging.getLogger(__name__)
 
 # Patterns for detecting buy/sell intent
 BUY_KEYWORDS = [
-    'куплю', 'покупаю', 'ищу', 'нужен', 'нужна', 'нужно',
-    'приму', 'возьму', 'куплю срочно', 'ищу срочно'
+    # Существующие
+    "куплю", "покупаю", "ищу", "нужен", "нужна", "нужно", "приму", "возьму",
+    # B2B оптовые
+    "закупаю", "закупаем", "закупим", "потребность", "заявка на",
+    "нужен объём", "нужен объем", "требуется", "готовы купить",
+    "готовы взять", "ищем поставщика", "запрос на", "кто продаёт",
+    "кто продает", "есть у кого", "предложите", "скиньте цену",
+    "актуальная цена", "кто может поставить", "нужна поставка",
 ]
 SELL_KEYWORDS = [
-    'продам', 'продаю', 'отдам', 'есть в наличии', 'в наличии',
-    'готов продать', 'продам срочно', 'срочно продам'
+    # Существующие
+    "продам", "продаю", "отдам", "есть в наличии", "в наличии", "готов продать",
+    # B2B оптовые
+    "продаём", "продаем", "реализуем", "реализую", "остатки",
+    "сток", "распродажа", "ликвидация склада", "по себестоимости",
+    "отгрузка со склада", "отгрузим", "поставим", "поставляем",
+    "предлагаем", "предлагаю", "есть объём", "есть объем",
+    "свободный остаток", "наличие на складе", "склад москва",
+    "склад мск", "с завода", "от производителя", "опт",
 ]
 
-# Known product patterns (common electronics, etc.)
-PRODUCT_PATTERNS = [
-    # iPhone с полной моделью: iPhone 15 Pro Max, iPhone 14, etc.
-    r'(iphone\s*\d+\s*(?:pro\s*max|pro|max|plus)?)',
-    r'(айфон\s*\d+\s*(?:про\s*макс|про|макс|плюс)?)',
-    # Samsung Galaxy
-    r'(samsung\s*(?:galaxy\s*)?[sa]\d+\s*(?:fe\s*)?(?:ultra|plus|\+)?)',
-    r'(самсунг\s*(?:галакси\s*)?[sa]\d+\s*(?:fe\s*)?(?:ультра|плюс)?)',
-    # MacBook
-    r'(macbook\s*(?:air|pro)?\s*(?:m\d)?(?:\s*\d+)?)',
-    r'(макбук\s*(?:эйр|про)?\s*(?:м\d)?(?:\s*\d+)?)',
-    # iPad
-    r'(ipad\s*(?:air|pro|mini)?\s*(?:\d+)?)',
-    r'(айпад\s*(?:эйр|про|мини)?\s*(?:\d+)?)',
-    # AirPods
-    r'(airpods\s*(?:pro|max)?\s*(?:\d+)?)',
-    r'(эйрподс?\s*(?:про|макс)?\s*(?:\d+)?)',
-    # Gaming consoles
-    r'(playstation\s*\d+|ps\s*\d+)',
-    r'(плейстейшн\s*\d+|пс\s*\d+)',
-    r'(xbox\s*(?:series\s*)?[xs]?)',
-    r'(nintendo\s*switch(?:\s*lite|oled)?)',
-    # Watches
-    r'(apple\s*watch\s*(?:se|ultra)?\s*(?:series\s*)?\d*)',
-    r'(эпл\s*вотч\s*(?:се|ультра)?\s*(?:серия\s*)?\d*)',
-    # Другая электроника
-    r'(dyson\s*\w+)',
-    r'(дайсон\s*\w+)',
-]
+# Стройматериалы — основная ниша
+CONSTRUCTION_PRODUCTS = {
+    # Металлопрокат
+    r'арматур[аыуе]?\s*[АаAa]?\s*\d*[СсCc]?\d*': 'арматура',
+    r'профнастил\w*': 'профнастил',
+    r'профлист\w*': 'профлист',
+    r'лист\s*(горяче|холодно)?катан\w*': 'лист стальной',
+    r'труб[аыуе]?\s*(профильн|круглая|стальн|ВГП|электросварн)?\w*': 'труба',
+    r'швеллер\w*': 'швеллер',
+    r'двутавр\w*': 'двутавр',
+    r'балк[аиу]\w*': 'балка',
+    r'угол[оо]?к?\w*\s*(стальн|равнополочн|неравнополочн)?\w*': 'уголок',
+    r'кругл?я?к?\w*\s*\d+': 'круг стальной',
+    r'метал{1,2}опрокат\w*': 'металлопрокат',
+    r'нержав\w+': 'нержавейка',
+    r'оцинков\w+': 'оцинковка',
+
+    # Бетон и цемент
+    r'цемент\w*\s*[МмMm]?\s*\d*': 'цемент',
+    r'бетон\w*\s*[МмBbВв]?\s*\d*': 'бетон',
+    r'пескобетон\w*': 'пескобетон',
+    r'раствор\w*\s*(кладочн|штукатурн)?\w*': 'раствор',
+    r'ЖБИ|жби': 'ЖБИ',
+    r'плит[аыу]\s*(перекрытия|дорожн|ПК|ПБ)\w*': 'плита',
+
+    # Пиломатериалы
+    r'доск[аиу]\w*\s*(обрезн|необрезн|строган)?\w*': 'доска',
+    r'брус\w*\s*\d*[хx×]\d*': 'брус',
+    r'фанер[аыу]\w*': 'фанера',
+    r'OSB|ОСП|осб': 'OSB',
+    r'пиломатериал\w*': 'пиломатериалы',
+    r'вагонк[аиу]\w*': 'вагонка',
+
+    # Кровля и изоляция
+    r'утеплител[ья]\w*': 'утеплитель',
+    r'(мин|минерал\w*)\s*ват[аыу]\w*': 'минвата',
+    r'пенопласт\w*': 'пенопласт',
+    r'пеноплекс\w*': 'пеноплекс',
+    r'(мягк|рулонн)\w*\s*кровл\w*': 'кровля мягкая',
+    r'черепиц[аыу]\w*': 'черепица',
+    r'металлочерепиц[аыу]\w*': 'металлочерепица',
+
+    # Сыпучие
+    r'песо?к\w*\s*(карьерн|речн|строительн)?\w*': 'песок',
+    r'щебен[ья]\w*|щебн\w*|щебёнк\w*': 'щебень',
+    r'ПГС|пгс|песчано[\s-]гравийн\w*': 'ПГС',
+    r'керамзит\w*': 'керамзит',
+    r'грунт\w*': 'грунт',
+
+    # Кирпич и блоки
+    r'кирпич\w*\s*(керамич|силикат|облицов|рядов)?\w*': 'кирпич',
+    r'газобетон\w*|газоблок\w*': 'газобетон',
+    r'пенобетон\w*|пеноблок\w*': 'пеноблок',
+    r'керамзитобетон\w*|керамзитоблок\w*': 'керамзитоблок',
+    r'блок\w*\s*(стенов|фундаментн|бетонн)?\w*': 'блок',
+
+    # Сухие смеси
+    r'штукатурк[аиу]\w*': 'штукатурка',
+    r'шпатлёвк[аиу]\w*|шпаклёвк[аиу]\w*': 'шпатлёвка',
+    r'клей\w*\s*(плиточн|для\s+блоков)?\w*': 'клей',
+    r'наливно[йе]\s*пол\w*': 'наливной пол',
+    r'грунтовк[аиу]\w*': 'грунтовка',
+
+    # Крепёж
+    r'саморез\w*': 'саморезы',
+    r'гвозд[ьией]\w*': 'гвозди',
+    r'анкер\w*': 'анкеры',
+}
+
+# Агро — вторая ниша (на будущее, пока не парсить активно)
+AGRICULTURE_PRODUCTS = {
+    r'пшениц[аыу]\w*': 'пшеница',
+    r'ячмен[ья]\w*': 'ячмень',
+    r'кукуруз[аыу]\w*': 'кукуруза',
+    r'подсолнечник\w*|семечк\w*': 'подсолнечник',
+    r'соев?\w*\s*(бобы|шрот|масло)?': 'соя',
+    r'сахар\w*\s*(песок)?': 'сахар',
+    r'масло\s*(подсолнечн|растительн)\w*': 'масло подсолнечное',
+    r'мук[аиу]\w*': 'мука',
+}
+
+# Объединённый словарь для текущего парсинга
+PRODUCT_PATTERNS = {**CONSTRUCTION_PRODUCTS}
 
 # Price patterns - more specific to avoid matching model numbers
 PRICE_PATTERNS = [
@@ -82,6 +149,23 @@ PRICE_PATTERNS = [
     r'(?:^|[^\d])(\d{5,7})(?:[^\d]|$)',
     # Number followed by "рублей": "50000 рублей"
     r'(\d[\d\s]*(?:[.,]\d+)?)\s*рубл',
+    # B2B: "48 500 руб/тонна", "3200 за м³"
+    r'(\d[\d\s.,]*\d)\s*(?:руб|₽|р)?\s*[/за]\s*(?:тонн[аыу]?|т\b|м[²³23]|куб|шт|рулон|лист|мешок|поддон|вагон)',
+    # B2B: "от 45000", "от 45 000"
+    r'от\s+(\d[\d\s.,]*\d)\s*(?:руб|₽|р)?',
+]
+
+# Unit patterns for B2B price-per-unit extraction
+UNIT_PATTERNS = [
+    (r'(?:руб|₽|р)\s*/?\s*(тонн[аыу]?|т\b)', 'тонна'),
+    (r'(?:руб|₽|р)\s*/?\s*(м[²2]|кв\.?\s*м)', 'м²'),
+    (r'(?:руб|₽|р)\s*/?\s*(м[³3]|куб\.?\s*м)', 'м³'),
+    (r'(?:руб|₽|р)\s*/?\s*(шт|штук)', 'шт'),
+    (r'(?:руб|₽|р)\s*/?\s*(рулон)', 'рулон'),
+    (r'(?:руб|₽|р)\s*/?\s*(лист)', 'лист'),
+    (r'(?:руб|₽|р)\s*/?\s*(мешок|мешк)', 'мешок'),
+    (r'(?:руб|₽|р)\s*/?\s*(поддон)', 'поддон'),
+    (r'(?:руб|₽|р)\s*/?\s*(вагон)', 'вагон'),
 ]
 
 # Phone number patterns to detect warm deals
@@ -224,21 +308,28 @@ def detect_order_type(text: str) -> Optional[OrderType]:
     return None
 
 
-def extract_product(text: str) -> str:
-    """
-    Извлечение названия товара из текста.
-    Использует известные паттерны, затем fallback на текст после ключевого слова.
+def extract_product(text: str) -> tuple[str | None, str | None]:
+    """Извлекает продукт и нишу из текста.
+
+    Returns:
+        (product_name, niche) — например ('арматура А500С', 'construction')
     """
     text_lower = text.lower()
 
-    # Сначала пробуем известные паттерны продуктов
-    for pattern in PRODUCT_PATTERNS:
+    # Сначала проверяем стройматериалы
+    for pattern, product_name in CONSTRUCTION_PRODUCTS.items():
         match = re.search(pattern, text_lower, re.IGNORECASE)
         if match:
-            product = match.group(1).strip()
-            # Правильная капитализация для брендов
-            product = normalize_product_name(product)
-            return product
+            # Извлечь полное описание (включая марку/размер)
+            full_product = match.group(0).strip()
+            return (full_product or product_name, 'construction')
+
+    # Потом агро (когда включим)
+    # for pattern, product_name in AGRICULTURE_PRODUCTS.items():
+    #     match = re.search(pattern, text_lower, re.IGNORECASE)
+    #     if match:
+    #         full_product = match.group(0).strip()
+    #         return (full_product or product_name, 'agriculture')
 
     # Fallback: извлекаем текст после ключевого слова купли/продажи
     all_keywords = BUY_KEYWORDS + SELL_KEYWORDS
@@ -246,54 +337,14 @@ def extract_product(text: str) -> str:
         if keyword in text_lower:
             idx = text_lower.find(keyword)
             after_keyword = text[idx + len(keyword):].strip()
-            # Берём текст до запятой, переноса строки или цены
             chunk = re.split(r'[,\n]|(?:\d+\s*(?:т\.?р|тыс|к|руб|р|₽))', after_keyword)[0].strip()
             if chunk and len(chunk) > 2:
-                # Очистка
                 chunk = re.sub(r'^[!.\s]+', '', chunk)
-                chunk = chunk[:100]  # Ограничение длины
-                return chunk if chunk else "Товар"
+                chunk = chunk[:100]
+                if chunk:
+                    return (chunk, None)
 
-    return "Товар"
-
-
-def normalize_product_name(product: str) -> str:
-    """
-    Нормализация названия продукта с правильной капитализацией брендов.
-    """
-    # Сначала применяем title() для базовой капитализации
-    product = product.title()
-
-    # Исправляем известные бренды
-    replacements = {
-        'Iphone': 'iPhone',
-        'Ipad': 'iPad',
-        'Macbook': 'MacBook',
-        'Airpods': 'AirPods',
-        'Airpod': 'AirPod',
-        'Imac': 'iMac',
-        'Ipod': 'iPod',
-        'Apple Watch': 'Apple Watch',
-        'Samsung': 'Samsung',
-        'Galaxy': 'Galaxy',
-        'Playstation': 'PlayStation',
-        'Xbox': 'Xbox',
-        'Nintendo': 'Nintendo',
-        'Dyson': 'Dyson',
-        ' Pro Max': ' Pro Max',
-        ' Pro ': ' Pro ',
-        ' Max': ' Max',
-        ' Plus': ' Plus',
-        ' Ultra': ' Ultra',
-        ' Air': ' Air',
-        ' Mini': ' Mini',
-        ' Se': ' SE',
-    }
-
-    for old, new in replacements.items():
-        product = product.replace(old, new)
-
-    return product
+    return (None, None)
 
 
 def extract_price(text: str) -> Optional[Decimal]:
@@ -322,8 +373,8 @@ def extract_price(text: str) -> Optional[Decimal]:
                 if any(m in full_match for m in ['к', 'тыс', 'т.р', 'тр']):
                     price *= 1000
 
-                # Проверка диапазона - цены обычно от 1000 до 10000000
-                if 1000 <= price <= 10000000:
+                # Проверка диапазона — от 100 руб/шт (крепёж) до 50M (вагон)
+                if 100 <= price <= 50_000_000:
                     found_prices.append(price)
             except Exception:
                 pass
@@ -391,56 +442,102 @@ def extract_quantity(text: str) -> Optional[str]:
     return None
 
 
-# Stop-words for product matching (common short words to ignore)
-_PRODUCT_STOP_WORDS = {
-    'в', 'на', 'за', 'по', 'от', 'до', 'из', 'и', 'или', 'с', 'у', 'к',
-    'б', 'бу', 'б/у', 'шт', 'штук', 'срочно', 'продам', 'куплю', 'отдам',
-    'ищу', 'нужен', 'нужна', 'нужно', 'есть', 'новый', 'новая', 'новое',
+def extract_volume(text: str) -> tuple[float | None, str | None]:
+    """Извлекает объём и единицу из текста.
+
+    Примеры:
+        '20 тонн' → (20.0, 'тонна')
+        '1 вагон' → (1.0, 'вагон')
+        '500 м²' → (500.0, 'м²')
+        '3 фуры' → (3.0, 'фура')
+    """
+    VOLUME_PATTERNS = [
+        (r'(\d[\d\s.,]*\d?)\s*(тонн[аыу]?|т\b)', 'тонна'),
+        (r'(\d[\d\s.,]*\d?)\s*(вагон\w*)', 'вагон'),
+        (r'(\d[\d\s.,]*\d?)\s*(фур[аыу]\w*|машин[аыу]\w*)', 'фура'),
+        (r'(\d[\d\s.,]*\d?)\s*(м[²2]|кв\.?\s*м\w*)', 'м²'),
+        (r'(\d[\d\s.,]*\d?)\s*(м[³3]|куб\.?\s*м\w*)', 'м³'),
+        (r'(\d[\d\s.,]*\d?)\s*(шт|штук\w*)', 'шт'),
+        (r'(\d[\d\s.,]*\d?)\s*(рулон\w*)', 'рулон'),
+        (r'(\d[\d\s.,]*\d?)\s*(лист\w*)', 'лист'),
+        (r'(\d[\d\s.,]*\d?)\s*(поддон\w*|палет\w*)', 'поддон'),
+        (r'(\d[\d\s.,]*\d?)\s*(мешк\w*|мешок)', 'мешок'),
+        (r'(\d[\d\s.,]*\d?)\s*(пач[ек]\w*|пачка)', 'пачка'),
+    ]
+    for pattern, unit in VOLUME_PATTERNS:
+        match = re.search(pattern, text.lower())
+        if match:
+            num_str = match.group(1).replace(' ', '').replace(',', '.')
+            try:
+                return (float(num_str), unit)
+            except ValueError:
+                continue
+    return (None, None)
+
+
+# Синонимы продуктов для матчинга
+_PRODUCT_SYNONYMS = {
+    frozenset({'профнастил', 'профлист'}),
+    frozenset({'доска', 'пиломатериал'}),
+    frozenset({'газобетон', 'газоблок'}),
+    frozenset({'пеноблок', 'пенобетон'}),
+    frozenset({'щебень', 'щебёнка'}),
+    frozenset({'минвата', 'утеплитель'}),
 }
 
-# Grade/code pattern: single letter + digits (e.g. "м500", "а100") — not product names
-_GRADE_CODE = re.compile(r'^[a-zа-яё]\d{2,}$', re.IGNORECASE)
+
+def _normalize_product(product: str) -> str:
+    """Нормализация названия продукта для матчинга."""
+    text = product.lower().strip()
+    # Убрать марки: А500С, М500, В25, D500, F150
+    text = re.sub(r'[АаAa]\d+[СсCcВвBb]?\d*', '', text)
+    text = re.sub(r'[МмMm]\d+', '', text)
+    text = re.sub(r'[ВвBb]\d+', '', text)
+    text = re.sub(r'[DdДд]\d+', '', text)
+    text = re.sub(r'[FfФф]\d+', '', text)
+    # Убрать размеры: 12мм, 150x150, ∅10
+    text = re.sub(r'\d+\s*[хx×]\s*\d+', '', text)
+    text = re.sub(r'[∅⌀]?\d+\s*мм', '', text)
+    return re.sub(r'\s+', ' ', text).strip()
 
 
 def _products_match(product_a: str, product_b: str) -> bool:
-    """
-    Universal product matching based on significant word overlap.
+    """Матчинг продуктов для B2B-опта.
 
-    Returns True if:
-    - 40%+ of significant words from the shorter set overlap, OR
-    - both contain the same keyword of length >= 4 chars
-    Grade/spec codes (e.g. "М500") are excluded from matching.
+    Правила:
+    1. Нормализация: lower + удалить марки (А500С, М500, В25)
+    2. Точное совпадение нормализованного названия → True
+    3. Корневое совпадение: 'арматура' ↔ 'арматуру' → True
+    4. Категорийное: 'профнастил' ↔ 'профлист' → True (синонимы)
+    5. Иначе: ≥50% пересечение значимых токенов (≥4 символов)
     """
     if not product_a or not product_b:
         return False
 
-    a_lower = product_a.lower()
-    b_lower = product_b.lower()
+    a = _normalize_product(product_a)
+    b = _normalize_product(product_b)
 
-    # Tokenize, filter stop words and grade codes
-    words_a = {
-        w for w in re.split(r'[\s/\-,]+', a_lower)
-        if w and w not in _PRODUCT_STOP_WORDS and len(w) >= 2 and not _GRADE_CODE.match(w)
-    }
-    words_b = {
-        w for w in re.split(r'[\s/\-,]+', b_lower)
-        if w and w not in _PRODUCT_STOP_WORDS and len(w) >= 2 and not _GRADE_CODE.match(w)
-    }
+    if a == b:
+        return True
 
-    if not words_a or not words_b:
+    # Проверить синонимы
+    for syn_group in _PRODUCT_SYNONYMS:
+        if a in syn_group and b in syn_group:
+            return True
+
+    # Проверить корневое совпадение (первые 5 символов)
+    if len(a) >= 5 and len(b) >= 5 and a[:5] == b[:5]:
+        return True
+
+    # Токенизация
+    tokens_a = {t for t in a.split() if len(t) >= 4}
+    tokens_b = {t for t in b.split() if len(t) >= 4}
+    if not tokens_a or not tokens_b:
         return False
 
-    # Check if any common keyword >= 4 chars exists
-    common = words_a & words_b
-    if any(len(w) >= 4 for w in common):
-        return True
-
-    # Check percentage overlap against shorter set
-    shorter = min(len(words_a), len(words_b))
-    if shorter > 0 and len(common) / shorter >= 0.4:
-        return True
-
-    return False
+    intersection = tokens_a & tokens_b
+    min_len = min(len(tokens_a), len(tokens_b))
+    return len(intersection) / min_len >= 0.5
 
 
 async def try_match_orders(db, new_order: Order) -> Optional[DetectedDeal]:
@@ -551,7 +648,9 @@ def _should_ai_respond(negotiation, side: str) -> bool:
     return True
 
 
-async def check_negotiation_response(db, sender_id: int, message_text: str) -> bool:
+async def check_negotiation_response(
+    db, sender_id: int, message_text: str, reply_to_msg_id: Optional[int] = None
+) -> bool:
     """
     Проверка, является ли сообщение ответом на активные переговоры.
     Если да - обрабатывает через AI negotiator.
@@ -565,6 +664,7 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
         db: Database session
         sender_id: Telegram sender ID
         message_text: Message text
+        reply_to_msg_id: Telegram message ID that this message replies to
 
     Returns:
         True if message was a negotiation response
@@ -604,7 +704,7 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
                 _passive_save_message(db, negotiation, message_text, MessageRole.SELLER, MessageTarget.SELLER)
                 await db.flush()
                 return True
-            success = await process_seller_response(negotiation, message_text, db)
+            success = await process_seller_response(negotiation, message_text, db, reply_to_msg_id=reply_to_msg_id)
             logger.info(f">>> process_seller_response вернул: {success}")
             return True
 
@@ -639,7 +739,7 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
                 _passive_save_message(db, negotiation, message_text, MessageRole.BUYER, MessageTarget.BUYER)
                 await db.flush()
                 return True
-            success = await process_buyer_response(negotiation, message_text, db)
+            success = await process_buyer_response(negotiation, message_text, db, reply_to_msg_id=reply_to_msg_id)
             logger.info(f">>> process_buyer_response вернул: {success}")
             return True
 
@@ -652,21 +752,103 @@ async def check_negotiation_response(db, sender_id: int, message_text: str) -> b
         return False
 
 
+async def _resolve_event_text(event, telegram_service) -> Optional[str]:
+    """
+    Convert any Telethon event to text, handling voice/media.
+
+    Returns:
+        Resolved text string or None if message should be skipped.
+    """
+    message = event.message
+    raw_text = event.text  # None for pure media messages
+
+    # Voice message handling (voice notes or audio documents)
+    if message.voice or (
+        message.document
+        and getattr(message.document, 'mime_type', None)
+        and message.document.mime_type.startswith('audio/')
+    ):
+        try:
+            audio_bytes = await telegram_service.client.download_media(message, bytes)
+            if audio_bytes:
+                from src.services.transcriber import transcribe_voice
+                mime = getattr(message.document, 'mime_type', 'audio/ogg') if message.document else 'audio/ogg'
+                ext = mime.split('/')[-1] if '/' in mime else 'ogg'
+                transcribed = await transcribe_voice(audio_bytes, f"voice.{ext}")
+                if transcribed:
+                    return f"[голосовое]: {transcribed}"
+                else:
+                    return "[голосовое сообщение]"
+            else:
+                return "[голосовое сообщение]"
+        except Exception as e:
+            logger.error(f"Voice download/transcribe error: {e}")
+            return "[голосовое сообщение]"
+
+    # Text messages (including captions on media)
+    if raw_text:
+        return raw_text
+
+    # Pure media without caption
+    if message.photo:
+        return "[фото]"
+    if message.video:
+        return "[видео]"
+    if getattr(message, 'document', None):
+        return "[документ]"
+    if getattr(message, 'sticker', None):
+        return "[стикер]"
+
+    # Truly empty (service messages, polls, etc.)
+    return None
+
+
+_message_buffer = None
+
+
+def _get_message_buffer():
+    """Get or create the global message buffer."""
+    global _message_buffer
+    if _message_buffer is None:
+        from src.services.message_buffer import MessageBuffer
+        _message_buffer = MessageBuffer(
+            resolve_fn=_resolve_event_text,
+            handler_fn=_process_message_internal,
+        )
+    return _message_buffer
+
+
 async def handle_new_message(event, telegram_service) -> None:
     """
     Handle incoming Telegram message.
+    Buffers consecutive messages from the same sender before processing.
 
     Args:
         event: Telethon NewMessage event
         telegram_service: TelegramService instance
     """
-    try:
-        # Skip own messages
-        if telegram_service.is_own_message(event.sender_id):
-            return
+    # Skip own messages early (before buffering)
+    if telegram_service.is_own_message(event.sender_id):
+        return
 
-        # Skip empty messages
-        if not event.text:
+    buf = _get_message_buffer()
+    await buf.on_message(event, telegram_service)
+
+
+async def _process_message_internal(event, telegram_service, raw_text: str = None) -> None:
+    """
+    Internal message processing. Called by the buffer with resolved/merged text.
+
+    Args:
+        event: Telethon NewMessage event (first event if merged)
+        telegram_service: TelegramService instance
+        raw_text: Pre-resolved text (from buffer). If None, resolves from event.
+    """
+    try:
+        # Resolve text if not provided (direct call without buffer)
+        if raw_text is None:
+            raw_text = await _resolve_event_text(event, telegram_service)
+        if not raw_text or raw_text.strip() == "":
             return
 
         message = event.message
@@ -678,7 +860,11 @@ async def handle_new_message(event, telegram_service) -> None:
         # In channels, sender_id can be None - use chat_id as fallback
         sender_id = event.sender_id or chat_id
         chat_title = getattr(chat, 'title', None) or getattr(chat, 'first_name', '') or str(chat_id)
-        raw_text = event.text
+
+        # Extract reply_to_msg_id for reply context tracking
+        reply_to_msg_id = None
+        if hasattr(message, 'reply_to') and message.reply_to:
+            reply_to_msg_id = getattr(message.reply_to, 'reply_to_msg_id', None)
 
         # Extract contact info (username or chat info)
         sender_username = getattr(sender, 'username', None) if sender else None
@@ -707,7 +893,7 @@ async def handle_new_message(event, telegram_service) -> None:
             # обработается как новая заявка вместо ответа на переговоры
             is_negotiation_response = False
             try:
-                is_negotiation_response = await check_negotiation_response(db, sender_id, raw_text)
+                is_negotiation_response = await check_negotiation_response(db, sender_id, raw_text, reply_to_msg_id=reply_to_msg_id)
                 logger.info(f">>> check_negotiation_response вернул: {is_negotiation_response}")
             except Exception as neg_check_error:
                 logger.error(f"!!! Ошибка в check_negotiation_response: {neg_check_error}", exc_info=True)
@@ -718,12 +904,22 @@ async def handle_new_message(event, telegram_service) -> None:
                 order_type = detect_order_type(raw_text)
 
                 if order_type:
-                    # Извлекаем товар, цену и регион
-                    product = extract_product(raw_text)
+                    # Извлекаем товар, цену, регион, объём
+                    product, niche = extract_product(raw_text)
                     price = extract_price(raw_text)
                     region = extract_region(raw_text)
+                    volume, unit = extract_volume(raw_text)
+                    quantity_str = extract_quantity(raw_text)
 
-                    logger.info(f"Parsed: type={order_type.value}, product={product}, price={price}, region={region}")
+                    # Если продукт не найден — используем fallback
+                    if not product:
+                        product = "Товар"
+
+                    logger.info(
+                        f"Parsed: type={order_type.value}, product={product}, "
+                        f"niche={niche}, price={price}, region={region}, "
+                        f"volume={volume}, unit={unit}"
+                    )
 
                     # Проверяем, существует ли уже такая заявка
                     existing = await db.execute(
@@ -741,10 +937,15 @@ async def handle_new_message(event, telegram_service) -> None:
                             message_id=message_id,
                             product=product,
                             price=price,
+                            quantity=quantity_str,
                             region=region,
                             raw_text=raw_text,
                             contact_info=contact_info,
                             is_active=True,
+                            platform='telegram',
+                            niche=niche,
+                            unit=unit,
+                            volume_numeric=Decimal(str(volume)) if volume else None,
                         )
                         db.add(order)
                         await db.flush()  # Получаем ID заявки
