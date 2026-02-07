@@ -670,13 +670,18 @@ async def try_match_orders(db, new_order: Order) -> Optional[DetectedDeal]:
     return None
 
 
-def _passive_save_message(db, negotiation, message_text: str, role: MessageRole, target: MessageTarget):
+def _passive_save_message(
+    db, negotiation, message_text: str, role: MessageRole, target: MessageTarget,
+    telegram_message_id: Optional[int] = None, media_type: Optional[str] = None,
+):
     """Save incoming message passively (no AI response). Manager sees it in chat."""
     msg = NegotiationMessage(
         negotiation_id=negotiation.id,
         role=role,
         target=target,
         content=message_text,
+        telegram_message_id=telegram_message_id,
+        media_type=media_type,
     )
     db.add(msg)
     logger.info(
@@ -721,7 +726,10 @@ def _should_ai_respond(negotiation, side: str, ai_mode: str = "autopilot") -> bo
 
 
 async def check_negotiation_response(
-    db, sender_id: int, message_text: str, reply_to_msg_id: Optional[int] = None
+    db, sender_id: int, message_text: str,
+    reply_to_msg_id: Optional[int] = None,
+    telegram_message_id: Optional[int] = None,
+    media_type: Optional[str] = None,
 ) -> bool:
     """
     Проверка, является ли сообщение ответом на активные переговоры.
@@ -777,10 +785,16 @@ async def check_negotiation_response(
                 f"(stage={negotiation.stage.value}, deal_id={negotiation.deal_id})"
             )
             if not _should_ai_respond(negotiation, "seller", ai_mode=ai_mode):
-                _passive_save_message(db, negotiation, message_text, MessageRole.SELLER, MessageTarget.SELLER)
+                _passive_save_message(db, negotiation, message_text, MessageRole.SELLER, MessageTarget.SELLER,
+                                     telegram_message_id=telegram_message_id, media_type=media_type)
                 await db.flush()
                 return True
-            success = await process_seller_response(negotiation, message_text, db, reply_to_msg_id=reply_to_msg_id)
+            success = await process_seller_response(
+                negotiation, message_text, db,
+                reply_to_msg_id=reply_to_msg_id,
+                telegram_message_id=telegram_message_id,
+                media_type=media_type,
+            )
             logger.info(f">>> process_seller_response вернул: {success}")
             return True
 
@@ -812,10 +826,16 @@ async def check_negotiation_response(
                 f"(stage={negotiation.stage.value}, deal_id={negotiation.deal_id})"
             )
             if not _should_ai_respond(negotiation, "buyer", ai_mode=ai_mode):
-                _passive_save_message(db, negotiation, message_text, MessageRole.BUYER, MessageTarget.BUYER)
+                _passive_save_message(db, negotiation, message_text, MessageRole.BUYER, MessageTarget.BUYER,
+                                     telegram_message_id=telegram_message_id, media_type=media_type)
                 await db.flush()
                 return True
-            success = await process_buyer_response(negotiation, message_text, db, reply_to_msg_id=reply_to_msg_id)
+            success = await process_buyer_response(
+                negotiation, message_text, db,
+                reply_to_msg_id=reply_to_msg_id,
+                telegram_message_id=telegram_message_id,
+                media_type=media_type,
+            )
             logger.info(f">>> process_buyer_response вернул: {success}")
             return True
 
@@ -938,12 +958,14 @@ async def _extract_order_data(text: str) -> Optional[dict]:
     }
 
 
-async def _resolve_event_text(event, telegram_service) -> Optional[str]:
+async def _resolve_event_text(event, telegram_service) -> tuple[Optional[str], Optional[str]]:
     """
     Convert any Telethon event to text, handling voice/media.
 
     Returns:
-        Resolved text string or None if message should be skipped.
+        (text, media_type) tuple:
+        - text: Resolved text string or None if message should be skipped.
+        - media_type: "photo", "video", "document", "sticker", or None for text-only.
     """
     message = event.message
     raw_text = event.text  # None for pure media messages
@@ -962,31 +984,42 @@ async def _resolve_event_text(event, telegram_service) -> Optional[str]:
                 ext = mime.split('/')[-1] if '/' in mime else 'ogg'
                 transcribed = await transcribe_voice(audio_bytes, f"voice.{ext}")
                 if transcribed:
-                    return f"[голосовое]: {transcribed}"
+                    return (f"[голосовое]: {transcribed}", None)
                 else:
-                    return "[голосовое сообщение]"
+                    return ("[голосовое сообщение]", None)
             else:
-                return "[голосовое сообщение]"
+                return ("[голосовое сообщение]", None)
         except Exception as e:
             logger.error(f"Voice download/transcribe error: {e}")
-            return "[голосовое сообщение]"
+            return ("[голосовое сообщение]", None)
+
+    # Detect media type from message
+    media_type = None
+    if message.photo:
+        media_type = "photo"
+    elif message.video:
+        media_type = "video"
+    elif getattr(message, 'sticker', None):
+        media_type = "sticker"
+    elif getattr(message, 'document', None):
+        media_type = "document"
 
     # Text messages (including captions on media)
     if raw_text:
-        return raw_text
+        return (raw_text, media_type)
 
     # Pure media without caption
-    if message.photo:
-        return "[фото]"
-    if message.video:
-        return "[видео]"
-    if getattr(message, 'document', None):
-        return "[документ]"
-    if getattr(message, 'sticker', None):
-        return "[стикер]"
+    if media_type == "photo":
+        return ("[фото]", "photo")
+    if media_type == "video":
+        return ("[видео]", "video")
+    if media_type == "document":
+        return ("[документ]", "document")
+    if media_type == "sticker":
+        return ("[стикер]", "sticker")
 
     # Truly empty (service messages, polls, etc.)
-    return None
+    return (None, None)
 
 
 _message_buffer = None
@@ -1021,7 +1054,7 @@ async def handle_new_message(event, telegram_service) -> None:
     await buf.on_message(event, telegram_service)
 
 
-async def _process_message_internal(event, telegram_service, raw_text: str = None) -> None:
+async def _process_message_internal(event, telegram_service, raw_text: str = None, media_type: str = None) -> None:
     """
     Internal message processing. Called by the buffer with resolved/merged text.
 
@@ -1029,11 +1062,12 @@ async def _process_message_internal(event, telegram_service, raw_text: str = Non
         event: Telethon NewMessage event (first event if merged)
         telegram_service: TelegramService instance
         raw_text: Pre-resolved text (from buffer). If None, resolves from event.
+        media_type: Media type if message has media ("photo", "video", "document", "sticker")
     """
     try:
         # Resolve text if not provided (direct call without buffer)
         if raw_text is None:
-            raw_text = await _resolve_event_text(event, telegram_service)
+            raw_text, media_type = await _resolve_event_text(event, telegram_service)
         if not raw_text or raw_text.strip() == "":
             return
 
@@ -1079,7 +1113,12 @@ async def _process_message_internal(event, telegram_service, raw_text: str = Non
             # обработается как новая заявка вместо ответа на переговоры
             is_negotiation_response = False
             try:
-                is_negotiation_response = await check_negotiation_response(db, sender_id, raw_text, reply_to_msg_id=reply_to_msg_id)
+                is_negotiation_response = await check_negotiation_response(
+                    db, sender_id, raw_text,
+                    reply_to_msg_id=reply_to_msg_id,
+                    telegram_message_id=message_id,
+                    media_type=media_type,
+                )
                 logger.info(f">>> check_negotiation_response вернул: {is_negotiation_response}")
             except Exception as neg_check_error:
                 logger.error(f"!!! Ошибка в check_negotiation_response: {neg_check_error}", exc_info=True)

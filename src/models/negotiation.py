@@ -10,6 +10,9 @@ from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text, func
 from sqlalchemy import Enum as SQLAlchemyEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+# Valid media types for NegotiationMessage.media_type
+MEDIA_TYPES = {"photo", "video", "document", "sticker"}
+
 from src.models.base import Base, TimestampMixin
 
 if TYPE_CHECKING:
@@ -146,6 +149,11 @@ class NegotiationMessage(Base):
         ForeignKey("users.id"),
         nullable=True,
         comment="User ID if sent by manager",
+    )
+    media_type: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,
+        comment="Media type: photo, video, document, sticker (null = text only)",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

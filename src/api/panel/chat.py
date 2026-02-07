@@ -4,9 +4,14 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
+import io
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+
+logger = logging.getLogger(__name__)
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -465,3 +470,106 @@ async def get_suggestions(
         variants=variants if variants else [],
         margin_info=margin_info,
     )
+
+
+@router.get("/{negotiation_id}/media/{message_id}")
+async def get_media(
+    negotiation_id: int,
+    message_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_manager),
+):
+    """
+    Proxy media (photo/video/document) from Telegram.
+
+    Downloads on-demand from Telegram using stored telegram_message_id,
+    streams to browser. No server-side file storage.
+    Browser caching via Cache-Control header avoids repeated downloads.
+    """
+    # Get negotiation with deal
+    result = await db.execute(
+        select(Negotiation)
+        .options(selectinload(Negotiation.deal))
+        .where(Negotiation.id == negotiation_id)
+    )
+    negotiation = result.scalar_one_or_none()
+
+    if not negotiation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Переговоры не найдены")
+
+    # SECURITY CHECK
+    if negotiation.deal.manager_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="У вас нет доступа")
+
+    # Get the message
+    msg_result = await db.execute(
+        select(NegotiationMessage).where(
+            NegotiationMessage.id == message_id,
+            NegotiationMessage.negotiation_id == negotiation_id,
+        )
+    )
+    message = msg_result.scalar_one_or_none()
+
+    if not message:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Сообщение не найдено")
+
+    if not message.media_type or not message.telegram_message_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Сообщение не содержит медиа")
+
+    # Determine chat entity based on message role/target
+    from src.services.telegram_client import get_telegram_service
+
+    telegram = get_telegram_service()
+    if not telegram or not telegram.client:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Telegram недоступен")
+
+    # Determine which chat to fetch from
+    if message.target == MessageTarget.SELLER:
+        entity_id = negotiation.seller_sender_id
+    else:
+        entity_id = negotiation.deal.buyer_sender_id
+
+    if not entity_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Контакт недоступен")
+
+    try:
+        # Fetch the message from Telegram to get fresh file reference
+        entity = await telegram.client.get_entity(entity_id)
+        tg_messages = await telegram.client.get_messages(entity, ids=message.telegram_message_id)
+
+        if not tg_messages:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Сообщение удалено в Telegram")
+
+        tg_msg = tg_messages
+
+        # Download media bytes
+        media_bytes = await telegram.client.download_media(tg_msg, bytes)
+
+        if not media_bytes:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Медиа недоступно")
+
+        # Determine content type
+        content_type_map = {
+            "photo": "image/jpeg",
+            "video": "video/mp4",
+            "sticker": "image/webp",
+        }
+        content_type = content_type_map.get(message.media_type, "application/octet-stream")
+
+        # For documents, try to get mime_type from Telegram
+        if message.media_type == "document" and hasattr(tg_msg, 'document') and tg_msg.document:
+            content_type = getattr(tg_msg.document, 'mime_type', None) or "application/octet-stream"
+
+        return StreamingResponse(
+            io.BytesIO(media_bytes),
+            media_type=content_type,
+            headers={
+                "Cache-Control": "private, max-age=3600",
+            },
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Media download error for msg #{message_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Ошибка загрузки медиа из Telegram")

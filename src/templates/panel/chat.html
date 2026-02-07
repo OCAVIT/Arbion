@@ -115,6 +115,11 @@
     </div>
 </div>
 
+<!-- Fullscreen media overlay -->
+<div id="mediaOverlay" class="media-overlay" onclick="closeFullscreen()">
+    <img id="mediaOverlayImg" src="" alt="Полный размер">
+</div>
+
 <style>
 /* Chat Page Styles */
 .chat-page {
@@ -358,6 +363,59 @@
     }
 }
 
+/* Media in messages */
+.media-photo {
+    max-width: 100%;
+    max-height: 300px;
+    border-radius: 8px;
+    cursor: pointer;
+    margin-top: 4px;
+    display: block;
+}
+
+.media-video {
+    max-width: 100%;
+    max-height: 300px;
+    border-radius: 8px;
+    margin-top: 4px;
+    display: block;
+}
+
+.media-sticker {
+    max-width: 150px;
+    max-height: 150px;
+    display: block;
+}
+
+.media-doc-link {
+    display: inline-block;
+    margin-top: 4px;
+    color: var(--success);
+    text-decoration: underline;
+}
+
+/* Fullscreen overlay */
+.media-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    z-index: 9999;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+}
+
+.media-overlay img {
+    max-width: 95%;
+    max-height: 95%;
+    object-fit: contain;
+    border-radius: 4px;
+}
+
 /* Empty/Loading states */
 .empty, .loading {
     text-align: center;
@@ -525,7 +583,7 @@ function renderMessages(containerId, messages) {
                 <span class="message-sender">${escapeHtml(msg.sender_name)}</span>
                 <span class="message-time">${formatTime(msg.created_at)}</span>
             </div>
-            <div class="message-content">${escapeHtml(msg.content)}</div>
+            <div class="message-content">${renderMessageContent(msg)}</div>
         </div>
     `).join('');
 
@@ -651,6 +709,41 @@ function formatTime(dateStr) {
     }
     return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) +
            ' ' + date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+function renderMessageContent(msg) {
+    const mediaUrl = `/panel/chat/${negotiationId}/media/${msg.id}`;
+
+    if (msg.media_type === 'photo') {
+        const caption = (msg.content && msg.content !== '[фото]')
+            ? `<div style="margin-bottom:4px">${escapeHtml(msg.content)}</div>` : '';
+        return caption + `<img src="${mediaUrl}" loading="lazy" class="media-photo" onclick="openFullscreen(this.src)" alt="Фото">`;
+    }
+    if (msg.media_type === 'video') {
+        const caption = (msg.content && msg.content !== '[видео]')
+            ? `<div style="margin-bottom:4px">${escapeHtml(msg.content)}</div>` : '';
+        return caption + `<video controls preload="none" class="media-video"><source src="${mediaUrl}" type="video/mp4"></video>`;
+    }
+    if (msg.media_type === 'document') {
+        const caption = (msg.content && msg.content !== '[документ]')
+            ? `<div style="margin-bottom:4px">${escapeHtml(msg.content)}</div>` : '';
+        return caption + `<a href="${mediaUrl}" target="_blank" class="media-doc-link">Скачать документ</a>`;
+    }
+    if (msg.media_type === 'sticker') {
+        return `<img src="${mediaUrl}" loading="lazy" class="media-sticker" alt="Стикер">`;
+    }
+    return escapeHtml(msg.content);
+}
+
+function openFullscreen(src) {
+    const overlay = document.getElementById('mediaOverlay');
+    const img = document.getElementById('mediaOverlayImg');
+    img.src = src;
+    overlay.style.display = 'flex';
+}
+
+function closeFullscreen() {
+    document.getElementById('mediaOverlay').style.display = 'none';
 }
 
 function escapeHtml(text) {

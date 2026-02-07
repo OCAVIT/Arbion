@@ -43,10 +43,10 @@ class MessageBuffer:
     ):
         """
         Args:
-            resolve_fn: async function(event, telegram_service) -> Optional[str]
-                        Resolves a single event to text.
-            handler_fn: async function(event, telegram_service, merged_text) -> None
-                        The real message handler, called with merged text.
+            resolve_fn: async function(event, telegram_service) -> (Optional[str], Optional[str])
+                        Resolves a single event to (text, media_type) tuple.
+            handler_fn: async function(event, telegram_service, merged_text, media_type) -> None
+                        The real message handler, called with merged text and media_type.
             window: seconds to wait for more messages before flushing.
         """
         self._resolve_fn = resolve_fn
@@ -96,22 +96,23 @@ class MessageBuffer:
         try:
             if len(buf.events) == 1:
                 # Single message, no merging needed — resolve and process
-                resolved = await self._resolve_fn(buf.events[0], buf.telegram_service)
-                if resolved and resolved.strip():
-                    await self._handler_fn(buf.events[0], buf.telegram_service, resolved)
+                text, media_type = await self._resolve_fn(buf.events[0], buf.telegram_service)
+                if text and text.strip():
+                    await self._handler_fn(buf.events[0], buf.telegram_service, text, media_type)
             else:
                 # Multiple messages — resolve each, merge, process
+                # Media is dropped for merged messages (edge case)
                 logger.info(f"Merging {len(buf.events)} messages from sender {buf.sender_id}")
                 texts = []
                 for evt in buf.events:
-                    resolved = await self._resolve_fn(evt, buf.telegram_service)
-                    if resolved and resolved.strip():
-                        texts.append(resolved)
+                    text, _ = await self._resolve_fn(evt, buf.telegram_service)
+                    if text and text.strip():
+                        texts.append(text)
 
                 if texts:
                     merged_text = "\n".join(texts)
-                    # Use first event as the base for metadata
-                    await self._handler_fn(buf.events[0], buf.telegram_service, merged_text)
+                    # Use first event as the base for metadata, no media for merged
+                    await self._handler_fn(buf.events[0], buf.telegram_service, merged_text, None)
         except Exception as e:
             logger.error(f"Error processing buffered messages for {key}: {e}", exc_info=True)
 
