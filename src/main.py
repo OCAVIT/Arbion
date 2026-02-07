@@ -109,7 +109,7 @@ async def lifespan(app: FastAPI):
             "negotiator_interval_minutes": 15,
             "seed_queries": [],
             "ai_mode": "copilot",
-            "messaging_mode": "personal",
+            "messaging_mode": "business_account",
         }
 
         for key, value in default_settings.items():
