@@ -38,7 +38,8 @@ async function loadDeals() {
                 <span class="deal-product">${escapeHtml(deal.product)}</span>
                 <span class="badge badge-${deal.status}">${getStatusLabel(deal.status)}</span>
             </div>
-            <div class="deal-price">${formatMoney(deal.sell_price)}</div>
+            <div class="deal-price">${formatMoney(deal.sell_price)}${deal.unit ? '/' + escapeHtml(deal.unit) : ''}</div>
+            ${deal.volume ? `<div class="deal-volume">${escapeHtml(deal.volume)}</div>` : ''}
             <div class="deal-region">${deal.region || 'Регион не указан'}</div>
             ${deal.seller_contact ? `
                 <div class="deal-contact">
@@ -149,4 +150,32 @@ function showNotification(message, type = 'info') {
     setTimeout(() => notification.remove(), 5000);
 }
 </script>
+
+<style>
+.deal-volume {
+    font-size: 13px;
+    color: var(--text-secondary, #94a3b8);
+    margin-top: 2px;
+}
+
+@media (max-width: 768px) {
+    .deals-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 480px) {
+    .deal-card {
+        padding: 14px;
+    }
+
+    .deal-product {
+        font-size: 14px;
+    }
+
+    .deal-price {
+        font-size: 16px;
+    }
+}
+</style>
 {% endblock %}

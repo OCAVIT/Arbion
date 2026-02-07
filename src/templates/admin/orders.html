@@ -27,9 +27,9 @@
                 <th>Тип</th>
                 <th>Товар</th>
                 <th>Цена</th>
-                <th>Количество</th>
+                <th>Объём</th>
                 <th>Регион</th>
-                <th>Чат</th>
+                <th class="hide-mobile">Чат</th>
                 <th>Дата</th>
                 <th>Действия</th>
             </tr>
@@ -70,6 +70,21 @@ async function loadOrders() {
     renderPagination(data.total, data.page, data.pages);
 }
 
+function formatVolume(order) {
+    if (order.volume_numeric && order.unit) {
+        return `${parseFloat(order.volume_numeric)} ${escapeHtml(order.unit)}`;
+    }
+    if (order.quantity) return escapeHtml(order.quantity);
+    return '-';
+}
+
+function formatPrice(order) {
+    if (!order.price) return '-';
+    let s = formatMoney(order.price);
+    if (order.unit) s += '/' + escapeHtml(order.unit);
+    return s;
+}
+
 function renderOrders(orders) {
     const tbody = document.getElementById('ordersTableBody');
 
@@ -82,11 +97,11 @@ function renderOrders(orders) {
         <tr>
             <td>${order.id}</td>
             <td><span class="badge badge-${order.order_type}">${order.order_type === 'buy' ? 'Покупка' : 'Продажа'}</span></td>
-            <td>${escapeHtml(order.product)}</td>
-            <td>${order.price ? formatMoney(order.price) : '-'}</td>
-            <td>${order.quantity || '-'}</td>
+            <td>${escapeHtml(order.product)}${order.niche ? ` <span class="niche-tag">${escapeHtml(order.niche)}</span>` : ''}</td>
+            <td>${formatPrice(order)}</td>
+            <td>${formatVolume(order)}</td>
             <td>${order.region || '-'}</td>
-            <td>${order.chat_title || '-'}</td>
+            <td class="hide-mobile">${order.chat_title || '-'}</td>
             <td>${formatDate(order.created_at)}</td>
             <td class="actions">
                 <button onclick="deleteOrder(${order.id})" class="btn btn-sm btn-danger">Удалить</button>
@@ -139,4 +154,59 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 </script>
+
+<style>
+.niche-tag {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+    background-color: var(--accent-soft, rgba(99,102,241,0.1));
+    color: var(--accent, #818cf8);
+    margin-left: 4px;
+    vertical-align: middle;
+}
+
+@media (max-width: 768px) {
+    .hide-mobile {
+        display: none;
+    }
+
+    .data-table {
+        font-size: 13px;
+    }
+
+    .data-table th,
+    .data-table td {
+        padding: 8px 6px;
+    }
+
+    .filters-bar {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .filters-bar select,
+    .filters-bar input[type="text"] {
+        width: 100%;
+    }
+}
+
+@media (max-width: 480px) {
+    .data-table {
+        font-size: 12px;
+    }
+
+    .data-table th,
+    .data-table td {
+        padding: 6px 4px;
+    }
+
+    .btn-sm {
+        padding: 4px 8px;
+        font-size: 11px;
+    }
+}
+</style>
 {% endblock %}

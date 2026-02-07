@@ -50,6 +50,12 @@ class OrderResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime]
 
+    # Strategic update fields
+    platform: str = "telegram"
+    niche: Optional[str] = None
+    unit: Optional[str] = None
+    volume_numeric: Optional[Decimal] = None
+
     # Related info
     chat_title: Optional[str] = None
 

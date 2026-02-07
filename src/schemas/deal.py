@@ -160,6 +160,10 @@ class ManagerDealResponse(BaseModel):
     market_price_context: Optional[str] = None  # Manager sees market context
     platform: str = "telegram"
 
+    # Volume info from linked order
+    volume: Optional[str] = None  # e.g. "20 тонна", "500 м²"
+    unit: Optional[str] = None
+
     model_config = {"from_attributes": True}
 
     @classmethod
@@ -198,6 +202,17 @@ class ManagerDealResponse(BaseModel):
         if deal.status == DealStatus.HANDED_TO_MANAGER and seller_contact:
             actual_contact = seller_contact
 
+        # Extract volume from sell_order if available
+        volume_str = None
+        unit_str = None
+        sell_order = getattr(deal, 'sell_order', None)
+        if sell_order:
+            vol = getattr(sell_order, 'volume_numeric', None)
+            unit_str = getattr(sell_order, 'unit', None)
+            if vol is not None and unit_str:
+                vol_num = float(vol)
+                volume_str = f"{int(vol_num) if vol_num == int(vol_num) else vol_num} {unit_str}"
+
         return cls(
             id=deal.id,
             product=deal.product,
@@ -218,6 +233,8 @@ class ManagerDealResponse(BaseModel):
             ai_draft_message=getattr(deal, 'ai_draft_message', None),
             market_price_context=getattr(deal, 'market_price_context', None),
             platform=getattr(deal, 'platform', 'telegram'),
+            volume=volume_str,
+            unit=unit_str,
         )
 
 
