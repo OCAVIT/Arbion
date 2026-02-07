@@ -127,6 +127,7 @@ async def get_warm_pool(
         .options(
             selectinload(DetectedDeal.negotiation),
             selectinload(DetectedDeal.sell_order),
+            selectinload(DetectedDeal.buy_order),
         )
         .where(
             and_(
