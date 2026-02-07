@@ -138,19 +138,7 @@ async def list_my_deals(
         deal_can_take = can_take and deal.manager_id is None
         deal_blocked_reason = blocked_reason if not deal_can_take and deal.manager_id is None else None
 
-        # Get seller contact ONLY if:
-        # 1. Deal status is HANDED_TO_MANAGER
-        # 2. Current user is the assigned manager
-        # 3. Messaging mode is "personal" (business_account hides all contacts)
-        seller_contact = None
-        if (
-            messaging_mode == "personal"
-            and deal.status == DealStatus.HANDED_TO_MANAGER
-            and deal.manager_id == current_user.id
-            and deal.sell_order
-        ):
-            seller_contact = deal.sell_order.contact_info
-
+        # Never expose seller/buyer contacts to manager
         items.append(
             ManagerDealResponse.from_deal(
                 deal,
@@ -158,7 +146,7 @@ async def list_my_deals(
                 messages_count=msg_count or 0,
                 can_take=deal_can_take,
                 take_blocked_reason=deal_blocked_reason,
-                seller_contact=seller_contact,
+                seller_contact=None,
             )
         )
 

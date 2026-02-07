@@ -54,6 +54,8 @@ async def process_outbox_message(
     try:
         sent_msg_id = None
 
+        reply_to = getattr(message, 'reply_to_message_id', None)
+
         # Media message (file/photo)
         if message.media_file_path and message.media_type:
             if not os.path.exists(message.media_file_path):
@@ -68,6 +70,7 @@ async def process_outbox_message(
                 message.media_file_path,
                 caption=message.message_text,
                 force_document=force_document,
+                reply_to=reply_to,
             )
         else:
             # Text-only message
@@ -81,6 +84,7 @@ async def process_outbox_message(
                 message.recipient_id,
                 message.message_text,
                 typing_delay=typing_delay,
+                reply_to=reply_to,
             )
 
         if sent_msg_id:

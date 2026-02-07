@@ -97,7 +97,7 @@ class TelegramService:
 
         self._message_handlers.append(wrapper)
 
-    async def send_message(self, recipient_id: int, text: str, typing_delay: float = 0) -> int | None:
+    async def send_message(self, recipient_id: int, text: str, typing_delay: float = 0, reply_to: int | None = None) -> int | None:
         """
         Send a message to a user or chat.
 
@@ -105,6 +105,7 @@ class TelegramService:
             recipient_id: Telegram user/chat ID
             text: Message text to send
             typing_delay: Seconds to show "typing" before sending (0 = no typing)
+            reply_to: Telegram message ID to reply to
 
         Returns:
             Telegram message ID if sent successfully, None otherwise.
@@ -122,7 +123,7 @@ class TelegramService:
                 async with self.client.action(entity, 'typing'):
                     await asyncio.sleep(typing_delay)
 
-            sent_msg = await self.client.send_message(entity, text)
+            sent_msg = await self.client.send_message(entity, text, reply_to=reply_to)
             # Mark their messages as read so it shows "read" in Telegram
             try:
                 await self.client.send_read_acknowledge(entity)
@@ -143,6 +144,7 @@ class TelegramService:
         file_path: str,
         caption: str = None,
         force_document: bool = False,
+        reply_to: int | None = None,
     ) -> int | None:
         """
         Send a file (photo/document) to a user or chat.
@@ -152,6 +154,7 @@ class TelegramService:
             file_path: Path to the file on disk
             caption: Optional text caption
             force_document: If True, send as document even for images
+            reply_to: Telegram message ID to reply to
 
         Returns:
             Telegram message ID if sent successfully, None otherwise.
@@ -167,6 +170,7 @@ class TelegramService:
                 file_path,
                 caption=caption,
                 force_document=force_document,
+                reply_to=reply_to,
             )
             try:
                 await self.client.send_read_acknowledge(entity)

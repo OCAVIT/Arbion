@@ -75,6 +75,11 @@ class OutboxMessage(Base):
         nullable=True,
         comment="Original filename for documents",
     )
+    reply_to_message_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        nullable=True,
+        comment="Telegram message ID to reply to",
+    )
     error_message: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,

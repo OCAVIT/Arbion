@@ -272,6 +272,7 @@ class MessageResponse(BaseModel):
     created_at: datetime
     media_type: Optional[str] = None  # "photo", "video", "document", "sticker"
     file_name: Optional[str] = None  # Original filename for documents
+    telegram_message_id: Optional[int] = None  # This message's Telegram ID
     reply_to_message_id: Optional[int] = None  # Telegram msg ID this replies to
     reply_to_content: Optional[str] = None  # Truncated content of replied message
     reply_to_sender_name: Optional[str] = None  # Who sent the replied message
@@ -323,6 +324,7 @@ class MessageResponse(BaseModel):
             created_at=message.created_at,
             media_type=getattr(message, 'media_type', None),
             file_name=getattr(message, 'file_name', None),
+            telegram_message_id=getattr(message, 'telegram_message_id', None),
             reply_to_message_id=getattr(message, 'reply_to_message_id', None),
             reply_to_content=reply_info.get('content') if reply_info else None,
             reply_to_sender_name=reply_info.get('sender_name') if reply_info else None,
@@ -350,6 +352,10 @@ class SendMessageRequest(BaseModel):
         default="seller",
         pattern="^(seller|buyer)$",
         description="Target chat: seller or buyer"
+    )
+    reply_to_msg_id: Optional[int] = Field(
+        None,
+        description="NegotiationMessage ID to reply to (resolved to telegram_message_id)"
     )
 
 

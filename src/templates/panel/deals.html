@@ -41,13 +41,6 @@ async function loadDeals() {
             <div class="deal-price">${formatMoney(deal.sell_price)}${deal.unit ? '/' + escapeHtml(deal.unit) : ''}</div>
             ${deal.volume ? `<div class="deal-volume">${escapeHtml(deal.volume)}</div>` : ''}
             <div class="deal-region">${deal.region || 'Регион не указан'}</div>
-            ${deal.seller_contact ? `
-                <div class="deal-contact">
-                    <span class="contact-label">Контакт продавца:</span>
-                    <a href="tel:${escapeHtml(deal.seller_contact)}" class="contact-phone">${escapeHtml(deal.seller_contact)}</a>
-                    <button onclick="copyContact('${escapeHtml(deal.seller_contact)}')" class="btn btn-sm btn-outline copy-btn" title="Копировать">📋</button>
-                </div>
-            ` : ''}
             ${deal.status === 'won' && deal.commission ? `
                 <div class="deal-commission">
                     <span class="commission-label">Комиссия:</span>

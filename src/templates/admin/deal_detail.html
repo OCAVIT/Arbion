@@ -411,25 +411,50 @@
     flex-shrink: 0;
 }
 
-/* Reply reference in messages */
+/* Reply reference in messages - Telegram-like */
 .message-reply-ref {
-    background: rgba(255, 255, 255, 0.08);
-    border-left: 2px solid rgba(255, 255, 255, 0.3);
-    padding: 4px 8px;
+    background: rgba(255, 255, 255, 0.06);
+    border-left: 3px solid #34b7f1;
+    padding: 5px 10px;
     margin-bottom: 6px;
     border-radius: 4px;
     font-size: 12px;
     cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
 }
 
 .message-reply-ref:hover {
     background: rgba(255, 255, 255, 0.12);
 }
 
+.message-reply-ref.reply-from-seller {
+    border-left-color: #4fc3f7;
+}
+
+.message-reply-ref.reply-from-buyer {
+    border-left-color: #ce93d8;
+}
+
+.message-reply-ref.reply-from-manager {
+    border-left-color: #6366f1;
+}
+
+.message-reply-ref.reply-from-ai {
+    border-left-color: #ffa726;
+}
+
 .message-reply-ref .reply-ref-sender {
     font-weight: 600;
-    opacity: 0.9;
+    font-size: 12px;
+    color: #34b7f1;
 }
+
+.message-reply-ref.reply-from-seller .reply-ref-sender { color: #4fc3f7; }
+.message-reply-ref.reply-from-buyer .reply-ref-sender { color: #ce93d8; }
+.message-reply-ref.reply-from-manager .reply-ref-sender { color: #6366f1; }
+.message-reply-ref.reply-from-ai .reply-ref-sender { color: #ffa726; }
 
 .message-reply-ref .reply-ref-text {
     opacity: 0.7;
@@ -801,10 +826,7 @@ function renderMessages(containerId, messages, chatTarget) {
 
     container.innerHTML = messages.map(msg => {
         const replyRefHtml = renderReplyRef(msg);
-        const isCounterparty = msg.role === 'seller' || msg.role === 'buyer';
-        const replyBtnHtml = isCounterparty
-            ? `<div class="message-actions"><button class="btn-reply" onclick="setReply('${chatTarget}', ${msg.id}, '${escapeAttr(msg.sender_name)}', '${escapeAttr(truncate(msg.content, 60))}')">&#8617; Ответить</button></div>`
-            : '';
+        const replyBtnHtml = `<div class="message-actions"><button class="btn-reply" onclick="setReply('${chatTarget}', ${msg.id}, '${escapeAttr(msg.sender_name)}', '${escapeAttr(truncate(msg.content, 60))}')">&#8617; Ответить</button></div>`;
         return `
             <div class="message message-${msg.role}" data-msg-id="${msg.id}">
                 ${replyRefHtml}
@@ -828,7 +850,13 @@ function renderReplyRef(msg) {
     const content = msg.reply_to_content.replace(/\[фото\]|\[видео\]|\[документ\]/, function(m) {
         return {'[фото]': 'Фото', '[видео]': 'Видео', '[документ]': 'Документ'}[m] || m;
     });
-    return `<div class="message-reply-ref">
+    let roleClass = '';
+    const sn = msg.reply_to_sender_name;
+    if (sn === 'Продавец') roleClass = 'reply-from-seller';
+    else if (sn === 'Покупатель') roleClass = 'reply-from-buyer';
+    else if (sn === 'Ассистент') roleClass = 'reply-from-ai';
+    else roleClass = 'reply-from-manager';
+    return `<div class="message-reply-ref ${roleClass}">
         <span class="reply-ref-sender">${escapeHtml(msg.reply_to_sender_name)}</span>
         <span class="reply-ref-text">${escapeHtml(content)}</span>
     </div>`;
@@ -924,6 +952,9 @@ async function sendFileMessage(target) {
         formData.append('file', file);
         formData.append('target', target);
         formData.append('caption', caption);
+        if (replyTo[target]) {
+            formData.append('reply_to_msg_id', replyTo[target].id);
+        }
 
         const response = await fetch(`/admin/deals/${dealId}/send-file`, {
             method: 'POST',
@@ -987,10 +1018,14 @@ async function sendMessage(target) {
     btn.disabled = true;
 
     try {
+        const body = { content, target };
+        if (replyTo[target]) {
+            body.reply_to_msg_id = replyTo[target].id;
+        }
         await fetch(`/admin/deals/${dealId}/message`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content, target })
+            body: JSON.stringify(body)
         });
 
         input.value = '';

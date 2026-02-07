@@ -404,6 +404,19 @@ async def send_message(
     # Determine target
     target_enum = MessageTarget.SELLER if data.target == "seller" else MessageTarget.BUYER
 
+    # Resolve reply_to telegram_message_id from NegotiationMessage.id
+    reply_to_tg_id = None
+    if data.reply_to_msg_id:
+        reply_msg_result = await db.execute(
+            select(NegotiationMessage).where(
+                NegotiationMessage.id == data.reply_to_msg_id,
+                NegotiationMessage.negotiation_id == deal.negotiation.id,
+            )
+        )
+        reply_msg = reply_msg_result.scalar_one_or_none()
+        if reply_msg and reply_msg.telegram_message_id:
+            reply_to_tg_id = reply_msg.telegram_message_id
+
     # Add message to history
     message = NegotiationMessage(
         negotiation_id=deal.negotiation.id,
@@ -411,6 +424,7 @@ async def send_message(
         target=target_enum,
         content=data.content,
         sent_by_user_id=current_user.id,
+        reply_to_message_id=reply_to_tg_id,
     )
     db.add(message)
 
@@ -431,6 +445,7 @@ async def send_message(
         message_text=data.content,
         negotiation_id=deal.negotiation.id,
         sent_by_user_id=current_user.id,
+        reply_to_message_id=reply_to_tg_id,
     )
     db.add(outbox)
 
@@ -797,6 +812,7 @@ async def send_file(
     file: UploadFile = File(...),
     target: str = Form(..., pattern="^(seller|buyer)$"),
     caption: str = Form(default=""),
+    reply_to_msg_id: Optional[int] = Form(default=None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_owner),
 ):
@@ -837,6 +853,19 @@ async def send_file(
 
     target_enum = MessageTarget.SELLER if target == "seller" else MessageTarget.BUYER
 
+    # Resolve reply_to telegram_message_id
+    reply_to_tg_id = None
+    if reply_to_msg_id:
+        reply_msg_result = await db.execute(
+            select(NegotiationMessage).where(
+                NegotiationMessage.id == reply_to_msg_id,
+                NegotiationMessage.negotiation_id == deal.negotiation.id,
+            )
+        )
+        reply_msg = reply_msg_result.scalar_one_or_none()
+        if reply_msg and reply_msg.telegram_message_id:
+            reply_to_tg_id = reply_msg.telegram_message_id
+
     content = caption.strip() if caption and caption.strip() else (
         f"[{file.filename}]" if media_type == "document" else "[фото]"
     )
@@ -849,6 +878,7 @@ async def send_file(
         sent_by_user_id=current_user.id,
         media_type=media_type,
         file_name=file.filename if media_type == "document" else None,
+        reply_to_message_id=reply_to_tg_id,
     )
     db.add(message)
 
@@ -868,6 +898,7 @@ async def send_file(
         media_type=media_type,
         media_file_path=file_path,
         file_name=file.filename,
+        reply_to_message_id=reply_to_tg_id,
     )
     db.add(outbox)
 
