@@ -7,6 +7,7 @@ pending messages and sending them via Telegram.
 
 import asyncio
 import logging
+import os
 import random
 from datetime import datetime, timezone
 
@@ -51,14 +52,36 @@ async def process_outbox_message(
         return False
 
     try:
-        # Calculate realistic typing delay for human-like behavior
-        typing_delay = calculate_typing_delay(message.message_text)
+        sent_msg_id = None
 
-        sent_msg_id = await telegram.send_message(
-            message.recipient_id,
-            message.message_text,
-            typing_delay=typing_delay,
-        )
+        # Media message (file/photo)
+        if message.media_file_path and message.media_type:
+            if not os.path.exists(message.media_file_path):
+                message.status = OutboxStatus.FAILED
+                message.error_message = "Temp file not found (may have been lost during redeploy)"
+                logger.error(f"Outbox message {message.id}: temp file missing: {message.media_file_path}")
+                return False
+
+            force_document = message.media_type == "document"
+            sent_msg_id = await telegram.send_file(
+                message.recipient_id,
+                message.media_file_path,
+                caption=message.message_text,
+                force_document=force_document,
+            )
+        else:
+            # Text-only message
+            if not message.message_text:
+                message.status = OutboxStatus.FAILED
+                message.error_message = "No message text and no media"
+                return False
+
+            typing_delay = calculate_typing_delay(message.message_text)
+            sent_msg_id = await telegram.send_message(
+                message.recipient_id,
+                message.message_text,
+                typing_delay=typing_delay,
+            )
 
         if sent_msg_id:
             message.status = OutboxStatus.SENT
@@ -68,17 +91,32 @@ async def process_outbox_message(
             # Save Telegram message ID to NegotiationMessage for reply tracking
             if message.negotiation_id and sent_msg_id:
                 try:
-                    result = await db.execute(
-                        select(NegotiationMessage)
-                        .where(
-                            NegotiationMessage.negotiation_id == message.negotiation_id,
-                            NegotiationMessage.role == MessageRole.AI,
-                            NegotiationMessage.content == message.message_text,
-                            NegotiationMessage.telegram_message_id.is_(None),
+                    if message.media_type:
+                        # Media message: match by role + media_type + no tg_msg_id
+                        result = await db.execute(
+                            select(NegotiationMessage)
+                            .where(
+                                NegotiationMessage.negotiation_id == message.negotiation_id,
+                                NegotiationMessage.role == MessageRole.MANAGER,
+                                NegotiationMessage.media_type == message.media_type,
+                                NegotiationMessage.telegram_message_id.is_(None),
+                            )
+                            .order_by(NegotiationMessage.created_at.desc())
+                            .limit(1)
                         )
-                        .order_by(NegotiationMessage.created_at.desc())
-                        .limit(1)
-                    )
+                    else:
+                        # Text message: match by content
+                        result = await db.execute(
+                            select(NegotiationMessage)
+                            .where(
+                                NegotiationMessage.negotiation_id == message.negotiation_id,
+                                NegotiationMessage.role.in_([MessageRole.AI, MessageRole.MANAGER]),
+                                NegotiationMessage.content == message.message_text,
+                                NegotiationMessage.telegram_message_id.is_(None),
+                            )
+                            .order_by(NegotiationMessage.created_at.desc())
+                            .limit(1)
+                        )
                     neg_msg = result.scalar_one_or_none()
                     if neg_msg:
                         neg_msg.telegram_message_id = sent_msg_id
@@ -97,6 +135,16 @@ async def process_outbox_message(
         message.error_message = str(e)
         logger.error(f"Outbox message {message.id} error: {e}")
         return False
+
+    finally:
+        # Clean up temp file for media messages
+        if message.media_file_path:
+            try:
+                if os.path.exists(message.media_file_path):
+                    os.remove(message.media_file_path)
+                    logger.debug(f"Cleaned up temp file: {message.media_file_path}")
+            except Exception as e:
+                logger.warning(f"Failed to clean up temp file {message.media_file_path}: {e}")
 
 
 async def outbox_worker_iteration(db: AsyncSession) -> int:

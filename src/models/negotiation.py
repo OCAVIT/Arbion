@@ -155,6 +155,11 @@ class NegotiationMessage(Base):
         nullable=True,
         comment="Media type: photo, video, document, sticker (null = text only)",
     )
+    file_name: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Original filename for documents",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

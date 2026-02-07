@@ -271,6 +271,7 @@ class MessageResponse(BaseModel):
     sender_name: Optional[str]
     created_at: datetime
     media_type: Optional[str] = None  # "photo", "video", "document", "sticker"
+    file_name: Optional[str] = None  # Original filename for documents
 
     model_config = {"from_attributes": True}
 
@@ -316,6 +317,7 @@ class MessageResponse(BaseModel):
             sender_name=display_name,
             created_at=message.created_at,
             media_type=getattr(message, 'media_type', None),
+            file_name=getattr(message, 'file_name', None),
         )
 
 

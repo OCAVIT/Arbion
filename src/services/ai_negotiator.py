@@ -1077,6 +1077,7 @@ async def process_seller_response(
     reply_to_msg_id: Optional[int] = None,
     telegram_message_id: Optional[int] = None,
     media_type: Optional[str] = None,
+    file_name: Optional[str] = None,
 ) -> bool:
     """
     Обработка ответа продавца с умной логикой ведения диалога.
@@ -1098,6 +1099,7 @@ async def process_seller_response(
             reply_to_message_id=reply_to_msg_id,
             telegram_message_id=telegram_message_id,
             media_type=media_type,
+            file_name=file_name,
         )
         db.add(seller_msg)
         await db.flush()
@@ -1320,6 +1322,7 @@ async def process_buyer_response(
     reply_to_msg_id: Optional[int] = None,
     telegram_message_id: Optional[int] = None,
     media_type: Optional[str] = None,
+    file_name: Optional[str] = None,
 ) -> bool:
     """
     Обработка ответа покупателя.
@@ -1341,6 +1344,7 @@ async def process_buyer_response(
             reply_to_message_id=reply_to_msg_id,
             telegram_message_id=telegram_message_id,
             media_type=media_type,
+            file_name=file_name,
         )
         db.add(buyer_msg)
         await db.flush()

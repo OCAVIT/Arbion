@@ -39,7 +39,13 @@
             <div class="chat-messages" id="sellerMessages">
                 <div class="loading">Загрузка...</div>
             </div>
+            <div class="file-preview" id="sellerFilePreview" style="display:none">
+                <span class="file-preview-name" id="sellerFileName"></span>
+                <button class="file-preview-remove" onclick="clearFileSelection('seller')">&times;</button>
+            </div>
             <div class="chat-input-area" id="sellerInputArea">
+                <button onclick="document.getElementById('sellerFileInput').click()" class="btn-attach" title="Прикрепить файл">&#128206;</button>
+                <input type="file" id="sellerFileInput" style="display:none" onchange="handleFileSelect('seller', this)" accept=".jpg,.jpeg,.png,.gif,.bmp,.webp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar,.7z">
                 <input type="text" id="sellerMessageInput" placeholder="Написать продавцу...">
                 <button onclick="sendMessage('seller')" class="btn btn-primary">
                     <span class="btn-text">Отправить</span>
@@ -53,7 +59,13 @@
             <div class="chat-messages" id="buyerMessages">
                 <div class="loading">Загрузка...</div>
             </div>
+            <div class="file-preview" id="buyerFilePreview" style="display:none">
+                <span class="file-preview-name" id="buyerFileName"></span>
+                <button class="file-preview-remove" onclick="clearFileSelection('buyer')">&times;</button>
+            </div>
             <div class="chat-input-area" id="buyerInputArea">
+                <button onclick="document.getElementById('buyerFileInput').click()" class="btn-attach" title="Прикрепить файл">&#128206;</button>
+                <input type="file" id="buyerFileInput" style="display:none" onchange="handleFileSelect('buyer', this)" accept=".jpg,.jpeg,.png,.gif,.bmp,.webp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar,.7z">
                 <input type="text" id="buyerMessageInput" placeholder="Написать покупателю...">
                 <button onclick="sendMessage('buyer')" class="btn btn-primary">
                     <span class="btn-text">Отправить</span>
@@ -390,8 +402,63 @@
 .media-doc-link {
     display: inline-block;
     margin-top: 4px;
+    padding: 8px 12px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 8px;
     color: var(--success);
-    text-decoration: underline;
+    text-decoration: none;
+    font-size: 13px;
+    transition: background 0.2s;
+}
+
+.media-doc-link:hover {
+    background: rgba(255,255,255,0.15);
+}
+
+/* File attach button */
+.btn-attach {
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 8px;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+    flex-shrink: 0;
+}
+
+.btn-attach:hover {
+    opacity: 1;
+}
+
+/* File preview bar */
+.file-preview {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    background: var(--bg-hover, rgba(255,255,255,0.05));
+    border-bottom: 1px solid var(--border-color);
+    font-size: 13px;
+    gap: 8px;
+}
+
+.file-preview-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+}
+
+.file-preview-remove {
+    background: none;
+    border: none;
+    color: var(--danger, #ef4444);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 0 4px;
+    flex-shrink: 0;
 }
 
 /* Fullscreen overlay */
@@ -546,6 +613,8 @@ async function loadMessages() {
         dealClosed = true;
         document.getElementById('sellerInputArea').style.display = 'none';
         document.getElementById('buyerInputArea').style.display = 'none';
+        document.getElementById('sellerFilePreview').style.display = 'none';
+        document.getElementById('buyerFilePreview').style.display = 'none';
         document.getElementById('chatActions').style.display = 'none';
         clearInterval(refreshInterval);
 
@@ -592,15 +661,91 @@ function renderMessages(containerId, messages) {
     }
 }
 
+let selectedFiles = { seller: null, buyer: null };
+
+function handleFileSelect(target, input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    if (file.size > 50 * 1024 * 1024) {
+        alert('Файл слишком большой (макс. 50 МБ)');
+        input.value = '';
+        return;
+    }
+
+    selectedFiles[target] = file;
+    const preview = document.getElementById(`${target}FilePreview`);
+    const nameEl = document.getElementById(`${target}FileName`);
+    nameEl.textContent = `\uD83D\uDCCE ${file.name} (${formatFileSize(file.size)})`;
+    preview.style.display = 'flex';
+}
+
+function clearFileSelection(target) {
+    selectedFiles[target] = null;
+    document.getElementById(`${target}FileInput`).value = '';
+    document.getElementById(`${target}FilePreview`).style.display = 'none';
+}
+
+function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' Б';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' КБ';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' МБ';
+}
+
+async function sendFileMessage(target) {
+    const file = selectedFiles[target];
+    if (!file) return;
+
+    const inputId = target === 'seller' ? 'sellerMessageInput' : 'buyerMessageInput';
+    const input = document.getElementById(inputId);
+    const caption = input.value.trim();
+
+    // Find the send button
+    const inputArea = document.getElementById(`${target}InputArea`);
+    const btn = inputArea.querySelector('.btn-primary');
+    btn.disabled = true;
+
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('target', target);
+        formData.append('caption', caption);
+
+        const response = await fetch(`/panel/chat/${negotiationId}/send-file`, {
+            method: 'POST',
+            body: formData,
+        });
+
+        if (response.ok) {
+            clearFileSelection(target);
+            input.value = '';
+            loadMessages();
+        } else {
+            const data = await response.json();
+            alert(data.detail || 'Ошибка отправки файла');
+        }
+    } catch (e) {
+        alert('Ошибка сети при отправке файла');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
 async function sendMessage(target) {
     if (dealClosed) return;
+
+    // If file is selected, send file instead
+    if (selectedFiles[target]) {
+        return sendFileMessage(target);
+    }
 
     const inputId = target === 'seller' ? 'sellerMessageInput' : 'buyerMessageInput';
     const input = document.getElementById(inputId);
     const content = input.value.trim();
     if (!content) return;
 
-    const btn = input.nextElementSibling;
+    const inputArea = document.getElementById(`${target}InputArea`);
+    const btn = inputArea.querySelector('.btn-primary');
     btn.disabled = true;
 
     try {
@@ -725,9 +870,13 @@ function renderMessageContent(msg) {
         return caption + `<video controls preload="none" class="media-video"><source src="${mediaUrl}" type="video/mp4"></video>`;
     }
     if (msg.media_type === 'document') {
-        const caption = (msg.content && msg.content !== '[документ]')
+        const isPlaceholder = !msg.content || msg.content === '[документ]' || msg.content.startsWith('[документ:');
+        const caption = !isPlaceholder
             ? `<div style="margin-bottom:4px">${escapeHtml(msg.content)}</div>` : '';
-        return caption + `<a href="${mediaUrl}" target="_blank" class="media-doc-link">Скачать документ</a>`;
+        const docName = msg.file_name || 'Скачать документ';
+        const ext = docName.includes('.') ? docName.split('.').pop().toLowerCase() : '';
+        const icon = {'pdf': '\uD83D\uDCC4', 'doc': '\uD83D\uDCC3', 'docx': '\uD83D\uDCC3', 'xls': '\uD83D\uDCCA', 'xlsx': '\uD83D\uDCCA', 'zip': '\uD83D\uDCE6', 'rar': '\uD83D\uDCE6'}[ext] || '\uD83D\uDCCE';
+        return caption + `<a href="${mediaUrl}" target="_blank" class="media-doc-link">${icon} ${escapeHtml(docName)}</a>`;
     }
     if (msg.media_type === 'sticker') {
         return `<img src="${mediaUrl}" loading="lazy" class="media-sticker" alt="Стикер">`;

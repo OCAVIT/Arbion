@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Text, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text, func
 from sqlalchemy import Enum as SQLAlchemyEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,9 +37,9 @@ class OutboxMessage(Base):
         nullable=False,
         comment="Telegram user/chat ID to send to",
     )
-    message_text: Mapped[str] = mapped_column(
+    message_text: Mapped[Optional[str]] = mapped_column(
         Text,
-        nullable=False,
+        nullable=True,
     )
     status: Mapped[OutboxStatus] = mapped_column(
         SQLAlchemyEnum(
@@ -59,6 +59,21 @@ class OutboxMessage(Base):
         ForeignKey("users.id"),
         nullable=True,
         comment="User who initiated the message",
+    )
+    media_type: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,
+        comment="Media type: photo, document",
+    )
+    media_file_path: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="Temp file path for outgoing media",
+    )
+    file_name: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Original filename for documents",
     )
     error_message: Mapped[Optional[str]] = mapped_column(
         Text,

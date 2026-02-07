@@ -6,8 +6,10 @@ from typing import Optional
 
 import io
 import logging
+import os
+import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
@@ -560,12 +562,29 @@ async def get_media(
         if message.media_type == "document" and hasattr(tg_msg, 'document') and tg_msg.document:
             content_type = getattr(tg_msg.document, 'mime_type', None) or "application/octet-stream"
 
+        headers = {"Cache-Control": "private, max-age=3600"}
+
+        # Add Content-Disposition for documents (show filename, allow inline PDF viewing)
+        if message.media_type == "document":
+            fname = message.file_name
+            if not fname and hasattr(tg_msg, 'document') and tg_msg.document:
+                try:
+                    from telethon.tl.types import DocumentAttributeFilename
+                    for attr in (tg_msg.document.attributes or []):
+                        if isinstance(attr, DocumentAttributeFilename):
+                            fname = attr.file_name
+                            break
+                except Exception:
+                    pass
+            if fname:
+                # Use inline so PDFs open in browser, with filename for download
+                from urllib.parse import quote
+                headers["Content-Disposition"] = f'inline; filename="{quote(fname)}"'
+
         return StreamingResponse(
             io.BytesIO(media_bytes),
             media_type=content_type,
-            headers={
-                "Cache-Control": "private, max-age=3600",
-            },
+            headers=headers,
         )
 
     except HTTPException:
@@ -573,3 +592,149 @@ async def get_media(
     except Exception as e:
         logger.error(f"Media download error for msg #{message_id}: {e}")
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Ошибка загрузки медиа из Telegram")
+
+
+# Allowed file extensions for upload
+ALLOWED_EXTENSIONS = {
+    # Images
+    '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp',
+    # Documents
+    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+    '.txt', '.csv', '.rtf', '.odt', '.ods',
+    # Archives
+    '.zip', '.rar', '.7z',
+}
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+UPLOAD_DIR = os.path.join("uploads", "outbox")
+
+
+@router.post("/{negotiation_id}/send-file")
+async def send_file(
+    request: Request,
+    negotiation_id: int,
+    file: UploadFile = File(...),
+    target: str = Form(..., pattern="^(seller|buyer)$"),
+    caption: str = Form(default=""),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_manager),
+):
+    """
+    Send a file (photo/document) in the negotiation to seller or buyer.
+
+    File is saved temporarily and queued for sending via Telegram.
+    """
+    # Get negotiation with deal
+    result = await db.execute(
+        select(Negotiation)
+        .options(selectinload(Negotiation.deal))
+        .where(Negotiation.id == negotiation_id)
+    )
+    negotiation = result.scalar_one_or_none()
+
+    if not negotiation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Переговоры не найдены")
+
+    if negotiation.deal.manager_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="У вас нет доступа к этой сделке")
+
+    if negotiation.deal.status in [DealStatus.WON, DealStatus.LOST]:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Сделка уже закрыта")
+
+    # Validate file
+    if not file.filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл не выбран")
+
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Неподдерживаемый тип файла: {ext}",
+        )
+
+    # Read file content and check size
+    file_content = await file.read()
+    if len(file_content) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Файл слишком большой (макс. {MAX_FILE_SIZE // (1024*1024)} МБ)",
+        )
+
+    # Determine media type
+    image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}
+    media_type = "photo" if ext in image_extensions else "document"
+
+    # Save file to temp directory
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    unique_name = f"{uuid.uuid4()}{ext}"
+    file_path = os.path.join(UPLOAD_DIR, unique_name)
+
+    with open(file_path, "wb") as f:
+        f.write(file_content)
+
+    # Determine target
+    target_enum = MessageTarget.SELLER if target == "seller" else MessageTarget.BUYER
+
+    # Build content text
+    content = caption.strip() if caption and caption.strip() else (
+        f"[{file.filename}]" if media_type == "document" else "[фото]"
+    )
+
+    # Save to chat history
+    message = NegotiationMessage(
+        negotiation_id=negotiation_id,
+        role=MessageRole.MANAGER,
+        target=target_enum,
+        content=content,
+        sent_by_user_id=current_user.id,
+        media_type=media_type,
+        file_name=file.filename if media_type == "document" else None,
+    )
+    db.add(message)
+
+    # Determine recipient
+    if target == "seller":
+        recipient_id = negotiation.seller_sender_id
+    else:
+        recipient_id = negotiation.deal.buyer_sender_id
+        if not recipient_id:
+            # Clean up temp file
+            os.remove(file_path)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Контакт покупателя недоступен",
+            )
+
+    # Queue for sending
+    outbox = OutboxMessage(
+        recipient_id=recipient_id,
+        message_text=caption.strip() or None,
+        negotiation_id=negotiation_id,
+        sent_by_user_id=current_user.id,
+        media_type=media_type,
+        media_file_path=file_path,
+        file_name=file.filename,
+    )
+    db.add(outbox)
+
+    await log_action(
+        db=db,
+        user_id=current_user.id,
+        action=AuditAction.SEND_MESSAGE,
+        target_type="negotiation",
+        target_id=negotiation_id,
+        action_metadata={"type": "file", "filename": file.filename},
+        ip_address=get_client_ip(request),
+    )
+
+    await db.commit()
+    await db.refresh(message)
+
+    return {
+        "success": True,
+        "message_id": message.id,
+        "message": MessageResponse.from_message(
+            message,
+            role="manager",
+            sender_name=current_user.display_name,
+        ),
+    }

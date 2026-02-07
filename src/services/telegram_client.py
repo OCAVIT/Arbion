@@ -137,6 +137,50 @@ class TelegramService:
             logger.error(f"Failed to send message: {e}")
             return None
 
+    async def send_file(
+        self,
+        recipient_id: int,
+        file_path: str,
+        caption: str = None,
+        force_document: bool = False,
+    ) -> int | None:
+        """
+        Send a file (photo/document) to a user or chat.
+
+        Args:
+            recipient_id: Telegram user/chat ID
+            file_path: Path to the file on disk
+            caption: Optional text caption
+            force_document: If True, send as document even for images
+
+        Returns:
+            Telegram message ID if sent successfully, None otherwise.
+        """
+        if not self.client:
+            logger.warning("Cannot send file: Telegram client not initialized")
+            return None
+
+        try:
+            entity = await self.client.get_entity(recipient_id)
+            sent_msg = await self.client.send_file(
+                entity,
+                file_path,
+                caption=caption,
+                force_document=force_document,
+            )
+            try:
+                await self.client.send_read_acknowledge(entity)
+            except Exception:
+                pass
+            logger.info(f"File sent to {recipient_id} (msg_id={sent_msg.id})")
+            return sent_msg.id
+        except ValueError:
+            logger.error(f"User {recipient_id} not found")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to send file: {e}")
+            return None
+
     async def get_entity(self, entity_id: int):
         """Get a Telegram entity by ID."""
         if not self.client:
