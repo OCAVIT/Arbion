@@ -6,7 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, func
+from sqlalchemy import DateTime, ForeignKey, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, TimestampMixin
@@ -60,6 +60,20 @@ class LedgerEntry(Base, TimestampMixin):
         Numeric(12, 2),
         nullable=True,
         comment="Commission paid to the closing manager",
+    )
+
+    # Strategic update fields
+    deal_model: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+    commission_rate_applied: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(5, 4),
+        nullable=True,
+    )
+    lead_source: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,
     )
 
     # Relationships

@@ -93,5 +93,17 @@ class MonitoredChat(Base, TimestampMixin):
         nullable=True,
     )
 
+    # Strategic update fields
+    niche: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+    platform: Mapped[str] = mapped_column(
+        String(20),
+        default="telegram",
+        server_default="telegram",
+        nullable=False,
+    )
+
     def __repr__(self) -> str:
         return f"<MonitoredChat(id={self.id}, title='{self.title}', status={self.status})>"

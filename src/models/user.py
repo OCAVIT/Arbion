@@ -8,7 +8,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import Boolean, DateTime, Numeric, String
+from sqlalchemy import BigInteger, Boolean, DateTime, Numeric, String, Text
 from sqlalchemy import Enum as SQLAlchemyEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -88,6 +88,23 @@ class User(Base, TimestampMixin):
         nullable=True,
         default=generate_invite_token,
         comment="Unique token for manager's personal login link",
+    )
+
+    # Strategic update fields
+    niches: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="JSON array of niches: [\"construction\", \"agriculture\"]",
+    )
+    level: Mapped[str] = mapped_column(
+        String(20),
+        default="junior",
+        server_default="junior",
+        nullable=False,
+    )
+    telegram_user_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        nullable=True,
     )
 
     # Relationships

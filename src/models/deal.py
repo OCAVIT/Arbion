@@ -19,6 +19,26 @@ if TYPE_CHECKING:
     from src.models.user import User
 
 
+class LeadSource(str, Enum):
+    """Source of the lead."""
+    SYSTEM = "system"
+    MANAGER = "manager"
+
+
+class DealModel(str, Enum):
+    """Deal financial model."""
+    AGENCY = "agency"
+    TRANSIT = "transit"
+
+
+class PaymentStatus(str, Enum):
+    """Payment status for buyer/seller/commission."""
+    PENDING = "pending"
+    INVOICED = "invoiced"
+    PAID = "paid"
+    CONFIRMED = "confirmed"
+
+
 class DealStatus(str, Enum):
     """Status of the deal in the pipeline."""
     COLD = "cold"                      # Just created, not contacted
@@ -160,6 +180,65 @@ class DetectedDeal(Base, TimestampMixin):
         String(500),
         nullable=True,
         comment="Buyer preferences (color, size, config, etc.)",
+    )
+
+    # Strategic update fields
+    lead_source: Mapped[str] = mapped_column(
+        String(20),
+        default="system",
+        server_default="system",
+        nullable=False,
+    )
+    niche: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+    deal_model: Mapped[str] = mapped_column(
+        String(20),
+        default="agency",
+        server_default="agency",
+        nullable=False,
+    )
+    manager_commission_rate: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(5, 4),
+        nullable=True,
+    )
+    buyer_payment_status: Mapped[str] = mapped_column(
+        String(20),
+        default="pending",
+        server_default="pending",
+        nullable=False,
+    )
+    seller_payment_status: Mapped[str] = mapped_column(
+        String(20),
+        default="pending",
+        server_default="pending",
+        nullable=False,
+    )
+    our_commission_status: Mapped[str] = mapped_column(
+        String(20),
+        default="pending",
+        server_default="pending",
+        nullable=False,
+    )
+    payment_method: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+    ai_draft_message: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    market_price_context: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="JSON: avg_price, min_seen, max_seen, sources_count",
+    )
+    platform: Mapped[str] = mapped_column(
+        String(20),
+        default="telegram",
+        server_default="telegram",
+        nullable=False,
     )
 
     # Buyer info (OWNER ONLY - never expose to managers)

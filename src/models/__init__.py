@@ -8,7 +8,7 @@ All models are exported here for convenient imports:
 from src.models.audit import AuditAction, AuditLog
 from src.models.base import Base, BaseModel, TimestampMixin
 from src.models.chat import ChatSource, ChatStatus, MonitoredChat
-from src.models.deal import DealStatus, DetectedDeal
+from src.models.deal import DealModel, DealStatus, DetectedDeal, LeadSource, PaymentStatus
 from src.models.ledger import LedgerEntry
 from src.models.negotiation import (
     MessageRole,
@@ -41,6 +41,9 @@ __all__ = [
     # Deal
     "DetectedDeal",
     "DealStatus",
+    "DealModel",
+    "LeadSource",
+    "PaymentStatus",
     # Negotiation
     "Negotiation",
     "NegotiationMessage",

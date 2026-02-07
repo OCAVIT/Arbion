@@ -85,5 +85,25 @@ class Order(Base, TimestampMixin):
         index=True,
     )
 
+    # Strategic update fields
+    platform: Mapped[str] = mapped_column(
+        String(20),
+        default="telegram",
+        server_default="telegram",
+        nullable=False,
+    )
+    niche: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+    unit: Mapped[Optional[str]] = mapped_column(
+        String(30),
+        nullable=True,
+    )
+    volume_numeric: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(12, 2),
+        nullable=True,
+    )
+
     def __repr__(self) -> str:
         return f"<Order(id={self.id}, type={self.order_type}, product='{self.product}')>"
