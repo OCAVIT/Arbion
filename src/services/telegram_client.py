@@ -135,6 +135,17 @@ class TelegramService:
             logger.error(f"User {recipient_id} not found")
             return None
         except Exception as e:
+            # If send failed and we had reply_to, retry without it
+            # (reply_to may reference a message from a different chat context)
+            if reply_to:
+                logger.warning(f"Failed to send with reply_to={reply_to}, retrying without: {e}")
+                try:
+                    sent_msg = await self.client.send_message(entity, text)
+                    logger.info(f"Message sent to {recipient_id} without reply (msg_id={sent_msg.id})")
+                    return sent_msg.id
+                except Exception as e2:
+                    logger.error(f"Failed to send message (retry without reply): {e2}")
+                    return None
             logger.error(f"Failed to send message: {e}")
             return None
 
@@ -182,6 +193,21 @@ class TelegramService:
             logger.error(f"User {recipient_id} not found")
             return None
         except Exception as e:
+            # If send failed and we had reply_to, retry without it
+            if reply_to:
+                logger.warning(f"Failed to send file with reply_to={reply_to}, retrying without: {e}")
+                try:
+                    sent_msg = await self.client.send_file(
+                        entity,
+                        file_path,
+                        caption=caption,
+                        force_document=force_document,
+                    )
+                    logger.info(f"File sent to {recipient_id} without reply (msg_id={sent_msg.id})")
+                    return sent_msg.id
+                except Exception as e2:
+                    logger.error(f"Failed to send file (retry without reply): {e2}")
+                    return None
             logger.error(f"Failed to send file: {e}")
             return None
 
