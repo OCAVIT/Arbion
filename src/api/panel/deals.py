@@ -82,6 +82,7 @@ async def list_my_deals(
         .options(
             selectinload(DetectedDeal.negotiation),
             selectinload(DetectedDeal.sell_order),
+            selectinload(DetectedDeal.buy_order),
         )
         .where(*conditions)
     )
