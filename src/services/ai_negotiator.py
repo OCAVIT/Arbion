@@ -8,6 +8,7 @@ AI Negotiator service для прогрева холодных лидов.
 - Прогресс сделок: COLD -> IN_PROGRESS -> WARM
 """
 
+import json
 import logging
 import random
 import re
@@ -35,6 +36,16 @@ from src.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Media markers used for non-text messages
+_MEDIA_MARKERS = {"[фото]", "[видео]", "[документ]", "[стикер]", "[голосовое сообщение]"}
+
+
+def _is_media_only(text: str) -> bool:
+    """Check if text is a media marker (no useful data to extract)."""
+    stripped = text.strip()
+    return stripped in _MEDIA_MARKERS or stripped.startswith("[голосовое сообщение")
+
 
 # =====================================================
 # ШАБЛОНЫ СООБЩЕНИЙ
@@ -862,137 +873,184 @@ def build_ai_insight(deal) -> str:
 async def initiate_negotiation(deal: DetectedDeal, db: AsyncSession) -> Optional[Negotiation]:
     """
     Начало переговоров по холодной сделке.
-    Создаёт Negotiation и отправляет первые сообщения продавцу и покупателю.
+
+    Поведение зависит от ai_mode (SystemSetting):
+    - 'copilot' (default): генерирует AI-драфт и рыночный контекст,
+      НЕ создаёт Negotiation, НЕ отправляет сообщения. Сделка остаётся COLD.
+    - 'autopilot': создаёт Negotiation, отправляет сообщения через outbox.
     """
     try:
-        # Проверяем, нет ли уже переговоров
-        existing = await db.execute(
-            select(Negotiation).where(Negotiation.deal_id == deal.id)
-        )
-        if existing.scalar_one_or_none():
-            logger.debug(f"Переговоры для сделки {deal.id} уже существуют")
-            return None
+        # Проверяем режим AI
+        from src.services.ai_copilot import get_ai_mode, copilot
+        ai_mode = await get_ai_mode(db)
 
-        # Получаем данные продавца из sell_order
-        result = await db.execute(
-            select(Order).where(Order.id == deal.sell_order_id)
-        )
-        sell_order = result.scalar_one_or_none()
-        if not sell_order:
-            logger.warning(f"Сделка {deal.id} не имеет sell_order (id={deal.sell_order_id})")
-            return None
-
-        seller_chat_id = sell_order.chat_id
-        seller_sender_id = sell_order.sender_id
-
-        if not seller_chat_id:
-            logger.warning(f"Сделка {deal.id}: sell_order без chat_id")
-            return None
-
-        # Создаём переговоры
-        negotiation = Negotiation(
-            deal_id=deal.id,
-            stage=NegotiationStage.INITIAL,
-            seller_chat_id=seller_chat_id,
-            seller_sender_id=seller_sender_id,
-        )
-        db.add(negotiation)
-        await db.flush()
-
-        logger.info(
-            f"Созданы переговоры #{negotiation.id} для сделки #{deal.id}: "
-            f"seller_sender_id={seller_sender_id}, seller_chat_id={seller_chat_id}, "
-            f"buyer_sender_id={deal.buyer_sender_id}, buyer_chat_id={deal.buyer_chat_id}"
-        )
-
-        # Определяем недостающие данные
-        seller_missing = detect_missing_fields(deal, "seller")
-
-        # Get listing text for context
-        seller_listing_text = sell_order.raw_text if sell_order else None
-
-        # Генерируем первое сообщение продавцу (LLM → fallback на шаблон)
-        price_str = str(deal.sell_price) if deal.sell_price else None
-        seller_message = await llm.generate_initial_message(
-            "seller", deal.product, price_str,
-            missing_data_hint=seller_missing["prompt_hint"],
-            listing_text=seller_listing_text,
-        )
-        if not seller_message:
-            seller_message = generate_response('initial_seller', deal.product)
-
-        # Сохраняем в историю (чат с продавцом)
-        msg = NegotiationMessage(
-            negotiation_id=negotiation.id,
-            role=MessageRole.AI,
-            target=MessageTarget.SELLER,
-            content=seller_message,
-        )
-        db.add(msg)
-
-        # Добавляем в очередь отправки
-        outbox_seller = OutboxMessage(
-            recipient_id=seller_sender_id or seller_chat_id,
-            message_text=seller_message,
-            status=OutboxStatus.PENDING,
-            negotiation_id=negotiation.id,
-        )
-        db.add(outbox_seller)
-
-        # Также контактируем покупателя
-        buyer_sender_id = deal.buyer_sender_id
-        buyer_chat_id = deal.buyer_chat_id
-
-        if buyer_sender_id or buyer_chat_id:
-            buyer_missing = detect_missing_fields(deal, "buyer")
-            # Get buy order listing text
-            buy_order_result = await db.execute(select(Order).where(Order.id == deal.buy_order_id))
-            buy_order = buy_order_result.scalar_one_or_none()
-            buyer_listing_text = buy_order.raw_text if buy_order else None
-            # НЕ передаём цену продавца покупателю — это убивает маржу
-            buyer_message = await llm.generate_initial_message(
-                "buyer", deal.product, None,
-                missing_data_hint=buyer_missing["prompt_hint"],
-                listing_text=buyer_listing_text,
-            )
-            if not buyer_message:
-                buyer_message = generate_response('initial_buyer', deal.product)
-
-            # Сохраняем в историю (чат с покупателем)
-            buyer_msg = NegotiationMessage(
-                negotiation_id=negotiation.id,
-                role=MessageRole.AI,
-                target=MessageTarget.BUYER,
-                content=buyer_message,
-            )
-            db.add(buyer_msg)
-
-            # Добавляем в очередь отправки
-            outbox_buyer = OutboxMessage(
-                recipient_id=buyer_sender_id or buyer_chat_id,
-                message_text=buyer_message,
-                status=OutboxStatus.PENDING,
-                negotiation_id=negotiation.id,
-            )
-            db.add(outbox_buyer)
-            logger.info(f"Сделка {deal.id}: сообщения отправлены продавцу и покупателю")
+        if ai_mode == "copilot":
+            return await _initiate_copilot(deal, db, copilot)
         else:
-            logger.info(f"Сделка {deal.id}: сообщение отправлено только продавцу (нет контакта покупателя)")
-
-        # Обновляем статус сделки
-        deal.status = DealStatus.IN_PROGRESS
-
-        return negotiation
+            return await _initiate_autopilot(deal, db)
 
     except Exception as e:
         logger.error(f"Ошибка при создании переговоров для сделки {deal.id}: {e}")
         raise
 
 
+async def _initiate_copilot(deal: DetectedDeal, db: AsyncSession, copilot_svc) -> None:
+    """Copilot mode: генерирует драфт и рыночный контекст, НЕ отправляет."""
+    # Пропускаем, если драфт уже сгенерирован
+    if deal.ai_draft_message:
+        logger.debug(f"Сделка {deal.id}: драфт уже есть, пропускаем")
+        return None
+
+    logger.info(f"Сделка {deal.id}: copilot mode — генерируем драфт")
+
+    # Генерируем драфт первого сообщения
+    draft = await copilot_svc.generate_initial_draft(deal, db)
+
+    # Собираем рыночный контекст
+    context = await copilot_svc.build_market_context(
+        deal.product, getattr(deal, 'niche', None), db
+    )
+
+    # Сохраняем в сделку
+    deal.ai_draft_message = draft
+    deal.market_price_context = json.dumps(context, ensure_ascii=False)
+    # Статус остаётся COLD — ждёт действия менеджера
+
+    await db.flush()
+    logger.info(
+        f"Сделка {deal.id}: copilot драфт сохранён "
+        f"('{draft[:50]}...', sources={context.get('sources_count', 0)})"
+    )
+    return None
+
+
+async def _initiate_autopilot(deal: DetectedDeal, db: AsyncSession) -> Optional[Negotiation]:
+    """Autopilot mode: создаёт Negotiation, отправляет сообщения (старое поведение)."""
+    # Проверяем, нет ли уже переговоров
+    existing = await db.execute(
+        select(Negotiation).where(Negotiation.deal_id == deal.id)
+    )
+    if existing.scalar_one_or_none():
+        logger.debug(f"Переговоры для сделки {deal.id} уже существуют")
+        return None
+
+    # Получаем данные продавца из sell_order
+    result = await db.execute(
+        select(Order).where(Order.id == deal.sell_order_id)
+    )
+    sell_order = result.scalar_one_or_none()
+    if not sell_order:
+        logger.warning(f"Сделка {deal.id} не имеет sell_order (id={deal.sell_order_id})")
+        return None
+
+    seller_chat_id = sell_order.chat_id
+    seller_sender_id = sell_order.sender_id
+
+    if not seller_chat_id:
+        logger.warning(f"Сделка {deal.id}: sell_order без chat_id")
+        return None
+
+    # Создаём переговоры
+    negotiation = Negotiation(
+        deal_id=deal.id,
+        stage=NegotiationStage.INITIAL,
+        seller_chat_id=seller_chat_id,
+        seller_sender_id=seller_sender_id,
+    )
+    db.add(negotiation)
+    await db.flush()
+
+    logger.info(
+        f"Созданы переговоры #{negotiation.id} для сделки #{deal.id}: "
+        f"seller_sender_id={seller_sender_id}, seller_chat_id={seller_chat_id}, "
+        f"buyer_sender_id={deal.buyer_sender_id}, buyer_chat_id={deal.buyer_chat_id}"
+    )
+
+    # Определяем недостающие данные
+    seller_missing = detect_missing_fields(deal, "seller")
+
+    # Get listing text for context
+    seller_listing_text = sell_order.raw_text if sell_order else None
+
+    # Генерируем первое сообщение продавцу (LLM → fallback на шаблон)
+    price_str = str(deal.sell_price) if deal.sell_price else None
+    seller_message = await llm.generate_initial_message(
+        "seller", deal.product, price_str,
+        missing_data_hint=seller_missing["prompt_hint"],
+        listing_text=seller_listing_text,
+    )
+    if not seller_message:
+        seller_message = generate_response('initial_seller', deal.product)
+
+    # Сохраняем в историю (чат с продавцом)
+    msg = NegotiationMessage(
+        negotiation_id=negotiation.id,
+        role=MessageRole.AI,
+        target=MessageTarget.SELLER,
+        content=seller_message,
+    )
+    db.add(msg)
+
+    # Добавляем в очередь отправки
+    outbox_seller = OutboxMessage(
+        recipient_id=seller_sender_id or seller_chat_id,
+        message_text=seller_message,
+        status=OutboxStatus.PENDING,
+        negotiation_id=negotiation.id,
+    )
+    db.add(outbox_seller)
+
+    # Также контактируем покупателя
+    buyer_sender_id = deal.buyer_sender_id
+    buyer_chat_id = deal.buyer_chat_id
+
+    if buyer_sender_id or buyer_chat_id:
+        buyer_missing = detect_missing_fields(deal, "buyer")
+        # Get buy order listing text
+        buy_order_result = await db.execute(select(Order).where(Order.id == deal.buy_order_id))
+        buy_order = buy_order_result.scalar_one_or_none()
+        buyer_listing_text = buy_order.raw_text if buy_order else None
+        # НЕ передаём цену продавца покупателю — это убивает маржу
+        buyer_message = await llm.generate_initial_message(
+            "buyer", deal.product, None,
+            missing_data_hint=buyer_missing["prompt_hint"],
+            listing_text=buyer_listing_text,
+        )
+        if not buyer_message:
+            buyer_message = generate_response('initial_buyer', deal.product)
+
+        # Сохраняем в историю (чат с покупателем)
+        buyer_msg = NegotiationMessage(
+            negotiation_id=negotiation.id,
+            role=MessageRole.AI,
+            target=MessageTarget.BUYER,
+            content=buyer_message,
+        )
+        db.add(buyer_msg)
+
+        # Добавляем в очередь отправки
+        outbox_buyer = OutboxMessage(
+            recipient_id=buyer_sender_id or buyer_chat_id,
+            message_text=buyer_message,
+            status=OutboxStatus.PENDING,
+            negotiation_id=negotiation.id,
+        )
+        db.add(outbox_buyer)
+        logger.info(f"Сделка {deal.id}: сообщения отправлены продавцу и покупателю")
+    else:
+        logger.info(f"Сделка {deal.id}: сообщение отправлено только продавцу (нет контакта покупателя)")
+
+    # Обновляем статус сделки
+    deal.status = DealStatus.IN_PROGRESS
+
+    return negotiation
+
+
 async def process_seller_response(
     negotiation: Negotiation,
     response_text: str,
     db: AsyncSession,
+    reply_to_msg_id: Optional[int] = None,
 ) -> bool:
     """
     Обработка ответа продавца с умной логикой ведения диалога.
@@ -1011,6 +1069,7 @@ async def process_seller_response(
             role=MessageRole.SELLER,
             target=MessageTarget.SELLER,
             content=response_text,
+            reply_to_message_id=reply_to_msg_id,
         )
         db.add(seller_msg)
         await db.flush()
@@ -1020,58 +1079,80 @@ async def process_seller_response(
         context = await get_conversation_context(negotiation, db, MessageTarget.SELLER)
         deal = negotiation.deal
 
-        # Извлекаем данные из ответа продавца (lazy import для избежания circular import)
-        from src.services.message_handler import extract_price, extract_region, extract_quantity
+        # Build reply context if this message is a reply to an AI message
+        reply_context = None
+        if reply_to_msg_id:
+            result_reply = await db.execute(
+                select(NegotiationMessage).where(
+                    NegotiationMessage.negotiation_id == negotiation.id,
+                    NegotiationMessage.telegram_message_id == reply_to_msg_id,
+                )
+            )
+            replied_to_msg = result_reply.scalar_one_or_none()
+            if replied_to_msg:
+                reply_context = (
+                    f'Собеседник ответил на сообщение: "{replied_to_msg.content[:150]}" '
+                    f'словами: "{response_text[:150]}"'
+                )
 
-        result_order = await db.execute(select(Order).where(Order.id == deal.sell_order_id))
-        sell_order = result_order.scalar_one_or_none()
+        # Skip data extraction for media-only messages (no useful data to extract)
+        if _is_media_only(response_text):
+            logger.info(f">>> Медиа-сообщение от продавца, пропускаем извлечение данных")
+            sell_order = None
+        else:
+            # Извлекаем данные из ответа продавца (lazy import для избежания circular import)
+            from src.services.message_handler import extract_price, extract_region, extract_quantity
 
-        if not deal.sell_price:
-            extracted_price = extract_price(response_text)
-            if extracted_price:
-                deal.sell_price = extracted_price
-                if sell_order:
-                    sell_order.price = extracted_price
-                if deal.buy_price:
-                    deal.margin = deal.buy_price - extracted_price
-                logger.info(f"Извлечена цена продавца {extracted_price} из ответа")
+            result_order = await db.execute(select(Order).where(Order.id == deal.sell_order_id))
+            sell_order = result_order.scalar_one_or_none()
 
-        if not deal.region:
-            extracted_region = extract_region(response_text)
-            if extracted_region:
-                deal.region = extracted_region
-                if sell_order:
-                    sell_order.region = extracted_region
-                logger.info(f"Извлечён регион '{extracted_region}' из ответа продавца")
-
-        if sell_order and not sell_order.quantity:
-            extracted_qty = extract_quantity(response_text)
-            if extracted_qty:
-                sell_order.quantity = extracted_qty
-                logger.info(f"Извлечено количество '{extracted_qty}' из ответа продавца")
-
-        # Extract condition, city, specs from seller response
-        if not deal.seller_condition:
-            extracted_condition = _extract_condition_from_text(response_text)
-            if extracted_condition:
-                deal.seller_condition = extracted_condition
-                logger.info(f"Извлечено состояние: '{extracted_condition[:50]}...'")
-
-        if not deal.seller_city:
-            extracted_city = extract_region(response_text)
-            if extracted_city:
-                deal.seller_city = extracted_city
-                if not deal.region:
-                    deal.region = extracted_city
+        if not _is_media_only(response_text):
+            if not deal.sell_price:
+                extracted_price = extract_price(response_text)
+                if extracted_price:
+                    deal.sell_price = extracted_price
                     if sell_order:
-                        sell_order.region = extracted_city
-                logger.info(f"Извлечён город продавца: '{extracted_city}'")
+                        sell_order.price = extracted_price
+                    if deal.buy_price:
+                        deal.margin = deal.buy_price - extracted_price
+                    logger.info(f"Извлечена цена продавца {extracted_price} из ответа")
 
-        if not deal.seller_specs:
-            extracted_specs = _extract_specs_from_text(response_text)
-            if extracted_specs:
-                deal.seller_specs = extracted_specs
-                logger.info(f"Извлечены спеки: '{extracted_specs[:50]}...'")
+            if not deal.region:
+                extracted_region = extract_region(response_text)
+                if extracted_region:
+                    deal.region = extracted_region
+                    if sell_order:
+                        sell_order.region = extracted_region
+                    logger.info(f"Извлечён регион '{extracted_region}' из ответа продавца")
+
+            if sell_order and not sell_order.quantity:
+                extracted_qty = extract_quantity(response_text)
+                if extracted_qty:
+                    sell_order.quantity = extracted_qty
+                    logger.info(f"Извлечено количество '{extracted_qty}' из ответа продавца")
+
+            # Extract condition, city, specs from seller response
+            if not deal.seller_condition:
+                extracted_condition = _extract_condition_from_text(response_text)
+                if extracted_condition:
+                    deal.seller_condition = extracted_condition
+                    logger.info(f"Извлечено состояние: '{extracted_condition[:50]}...'")
+
+            if not deal.seller_city:
+                extracted_city = extract_region(response_text)
+                if extracted_city:
+                    deal.seller_city = extracted_city
+                    if not deal.region:
+                        deal.region = extracted_city
+                        if sell_order:
+                            sell_order.region = extracted_city
+                    logger.info(f"Извлечён город продавца: '{extracted_city}'")
+
+            if not deal.seller_specs:
+                extracted_specs = _extract_specs_from_text(response_text)
+                if extracted_specs:
+                    deal.seller_specs = extracted_specs
+                    logger.info(f"Извлечены спеки: '{extracted_specs[:50]}...'")
 
         # Collect known data and determine missing fields
         known_data = collect_known_data(deal, "seller", context=context)
@@ -1096,6 +1177,7 @@ async def process_seller_response(
             known_data=known_data,
             missing_fields=seller_missing["missing"],
             conversation_summary=conversation_summary,
+            reply_context=reply_context,
         )
 
         if not llm_result:
@@ -1207,6 +1289,7 @@ async def process_buyer_response(
     negotiation: Negotiation,
     response_text: str,
     db: AsyncSession,
+    reply_to_msg_id: Optional[int] = None,
 ) -> bool:
     """
     Обработка ответа покупателя.
@@ -1225,6 +1308,7 @@ async def process_buyer_response(
             role=MessageRole.BUYER,
             target=MessageTarget.BUYER,
             content=response_text,
+            reply_to_message_id=reply_to_msg_id,
         )
         db.add(buyer_msg)
         await db.flush()
@@ -1234,42 +1318,64 @@ async def process_buyer_response(
         context = await get_conversation_context(negotiation, db, MessageTarget.BUYER)
         deal = negotiation.deal
 
-        # Извлекаем данные из ответа покупателя
-        from src.services.message_handler import extract_price, extract_region, extract_quantity
+        # Build reply context if this message is a reply to an AI message
+        reply_context = None
+        if reply_to_msg_id:
+            result_reply = await db.execute(
+                select(NegotiationMessage).where(
+                    NegotiationMessage.negotiation_id == negotiation.id,
+                    NegotiationMessage.telegram_message_id == reply_to_msg_id,
+                )
+            )
+            replied_to_msg = result_reply.scalar_one_or_none()
+            if replied_to_msg:
+                reply_context = (
+                    f'Собеседник ответил на сообщение: "{replied_to_msg.content[:150]}" '
+                    f'словами: "{response_text[:150]}"'
+                )
 
-        result_order = await db.execute(select(Order).where(Order.id == deal.buy_order_id))
-        buy_order = result_order.scalar_one_or_none()
+        # Skip data extraction for media-only messages
+        if _is_media_only(response_text):
+            logger.info(f">>> Медиа-сообщение от покупателя, пропускаем извлечение данных")
+            buy_order = None
+        else:
+            # Извлекаем данные из ответа покупателя
+            from src.services.message_handler import extract_price, extract_region, extract_quantity
 
-        if not deal.buy_price:
-            extracted_price = extract_price(response_text)
-            if extracted_price:
-                deal.buy_price = extracted_price
-                if buy_order:
-                    buy_order.price = extracted_price
-                if deal.sell_price:
-                    deal.margin = extracted_price - deal.sell_price
-                logger.info(f"Извлечён бюджет покупателя {extracted_price} из ответа")
+            result_order = await db.execute(select(Order).where(Order.id == deal.buy_order_id))
+            buy_order = result_order.scalar_one_or_none()
 
-        if not deal.region:
-            extracted_region = extract_region(response_text)
-            if extracted_region:
-                deal.region = extracted_region
-                if buy_order:
-                    buy_order.region = extracted_region
-                logger.info(f"Извлечён регион '{extracted_region}' из ответа покупателя")
+        if not _is_media_only(response_text):
+            if not deal.buy_price:
+                extracted_price = extract_price(response_text)
+                if extracted_price:
+                    deal.buy_price = extracted_price
+                    if buy_order:
+                        buy_order.price = extracted_price
+                    if deal.sell_price:
+                        deal.margin = extracted_price - deal.sell_price
+                    logger.info(f"Извлечён бюджет покупателя {extracted_price} из ответа")
 
-        if buy_order and not buy_order.quantity:
-            extracted_qty = extract_quantity(response_text)
-            if extracted_qty:
-                buy_order.quantity = extracted_qty
-                logger.info(f"Извлечено количество '{extracted_qty}' из ответа покупателя")
+            if not deal.region:
+                extracted_region = extract_region(response_text)
+                if extracted_region:
+                    deal.region = extracted_region
+                    if buy_order:
+                        buy_order.region = extracted_region
+                    logger.info(f"Извлечён регион '{extracted_region}' из ответа покупателя")
 
-        # Extract buyer preferences
-        if not getattr(deal, 'buyer_preferences', None):
-            extracted_prefs = _extract_preferences_from_text(response_text)
-            if extracted_prefs:
-                deal.buyer_preferences = extracted_prefs
-                logger.info(f"Извлечены предпочтения покупателя: '{extracted_prefs[:50]}...'")
+            if buy_order and not buy_order.quantity:
+                extracted_qty = extract_quantity(response_text)
+                if extracted_qty:
+                    buy_order.quantity = extracted_qty
+                    logger.info(f"Извлечено количество '{extracted_qty}' из ответа покупателя")
+
+            # Extract buyer preferences
+            if not getattr(deal, 'buyer_preferences', None):
+                extracted_prefs = _extract_preferences_from_text(response_text)
+                if extracted_prefs:
+                    deal.buyer_preferences = extracted_prefs
+                    logger.info(f"Извлечены предпочтения покупателя: '{extracted_prefs[:50]}...'")
 
         # Collect known data and determine missing fields
         known_data = collect_known_data(deal, "buyer", context=context)
@@ -1294,6 +1400,7 @@ async def process_buyer_response(
             known_data=known_data,
             missing_fields=buyer_missing["missing"],
             conversation_summary=conversation_summary,
+            reply_context=reply_context,
         )
 
         if not llm_result:
@@ -1396,20 +1503,33 @@ async def process_cold_deals(db: AsyncSession) -> int:
     """
     Поиск холодных сделок и инициация переговоров.
     Вызывается периодически планировщиком.
+
+    В режиме copilot: генерирует драфты для сделок без ai_draft_message.
+    В режиме autopilot: создаёт Negotiation и отправляет сообщения.
     """
-    # Находим холодные сделки без переговоров
-    result = await db.execute(
-        select(DetectedDeal)
-        .where(DetectedDeal.status == DealStatus.COLD)
-        .limit(10)
-    )
+    from src.services.ai_copilot import get_ai_mode
+    ai_mode = await get_ai_mode(db)
+
+    # Находим холодные сделки
+    query = select(DetectedDeal).where(DetectedDeal.status == DealStatus.COLD)
+
+    if ai_mode == "copilot":
+        # В copilot mode: только сделки без драфта
+        query = query.where(
+            (DetectedDeal.ai_draft_message.is_(None))
+            | (DetectedDeal.ai_draft_message == "")
+        )
+
+    result = await db.execute(query.limit(10))
     cold_deals = result.scalars().all()
 
     initiated = 0
     for deal in cold_deals:
         try:
             negotiation = await initiate_negotiation(deal, db)
-            if negotiation:
+            if ai_mode == "autopilot" and negotiation:
+                initiated += 1
+            elif ai_mode == "copilot" and deal.ai_draft_message:
                 initiated += 1
         except Exception as e:
             logger.error(f"Ошибка при инициации переговоров для сделки {deal.id}: {e}")
@@ -1418,6 +1538,9 @@ async def process_cold_deals(db: AsyncSession) -> int:
 
     if initiated > 0:
         await db.commit()
-        logger.info(f"Инициировано {initiated} новых переговоров")
+        if ai_mode == "copilot":
+            logger.info(f"Сгенерировано {initiated} AI-драфтов для менеджеров")
+        else:
+            logger.info(f"Инициировано {initiated} новых переговоров")
 
     return initiated

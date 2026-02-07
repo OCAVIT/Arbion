@@ -622,15 +622,20 @@ def _passive_save_message(db, negotiation, message_text: str, role: MessageRole,
 _AI_ALWAYS_SILENT = {NegotiationStage.CLOSED, NegotiationStage.HANDED_TO_MANAGER}
 
 
-def _should_ai_respond(negotiation, side: str) -> bool:
+def _should_ai_respond(negotiation, side: str, ai_mode: str = "autopilot") -> bool:
     """
     Check if AI should respond for this side of the negotiation.
 
     Each side (seller/buyer) is independent:
+    - copilot mode → always silent (manager handles all communication)
     - CLOSED / HANDED_TO_MANAGER → always silent
     - WARM → silent only for the side that already gave phone
     - Otherwise → AI responds
     """
+    # In copilot mode, AI never auto-responds — manager handles communication
+    if ai_mode == "copilot":
+        return False
+
     if negotiation.stage in _AI_ALWAYS_SILENT:
         return False
 
@@ -676,6 +681,10 @@ async def check_negotiation_response(
     try:
         logger.info(f">>> check_negotiation_response: sender_id={sender_id}, текст: '{message_text[:50]}...'")
 
+        # Определяем режим AI для управления авто-ответами
+        from src.services.ai_copilot import get_ai_mode
+        ai_mode = await get_ai_mode(db)
+
         # Проверяем, является ли это ответом ПРОДАВЦА (берём самые свежие переговоры)
         seller_query = (
             select(Negotiation)
@@ -700,7 +709,7 @@ async def check_negotiation_response(
                 f">>> НАЙДЕНЫ переговоры #{negotiation.id} для продавца {sender_id} "
                 f"(stage={negotiation.stage.value}, deal_id={negotiation.deal_id})"
             )
-            if not _should_ai_respond(negotiation, "seller"):
+            if not _should_ai_respond(negotiation, "seller", ai_mode=ai_mode):
                 _passive_save_message(db, negotiation, message_text, MessageRole.SELLER, MessageTarget.SELLER)
                 await db.flush()
                 return True
@@ -735,7 +744,7 @@ async def check_negotiation_response(
                 f">>> НАЙДЕНЫ переговоры #{negotiation.id} для покупателя {sender_id} "
                 f"(stage={negotiation.stage.value}, deal_id={negotiation.deal_id})"
             )
-            if not _should_ai_respond(negotiation, "buyer"):
+            if not _should_ai_respond(negotiation, "buyer", ai_mode=ai_mode):
                 _passive_save_message(db, negotiation, message_text, MessageRole.BUYER, MessageTarget.BUYER)
                 await db.flush()
                 return True
