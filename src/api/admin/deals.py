@@ -27,6 +27,7 @@ from src.models import (
     User,
     UserRole,
 )
+from pydantic import BaseModel, Field
 from src.schemas.deal import (
     DealAssignRequest,
     DealCloseRequest,
@@ -37,6 +38,23 @@ from src.schemas.deal import (
     SendMessageRequest,
 )
 from src.services.commission import calculate_commission_rate
+
+
+class PaymentUpdateRequest(BaseModel):
+    """Request to update deal payment statuses."""
+
+    buyer_payment_status: Optional[str] = Field(
+        None, pattern="^(pending|invoiced|paid|confirmed)$"
+    )
+    seller_payment_status: Optional[str] = Field(
+        None, pattern="^(pending|paid)$"
+    )
+    our_commission_status: Optional[str] = Field(
+        None, pattern="^(pending|invoiced|received)$"
+    )
+    payment_method: Optional[str] = Field(
+        None, pattern="^(bank_transfer|card|cash|crypto)$"
+    )
 from src.utils.audit import get_client_ip, log_action
 
 router = APIRouter(prefix="/deals")
@@ -575,6 +593,56 @@ async def delete_deal(
 
     await db.commit()
     return {"success": True}
+
+
+@router.patch("/{deal_id}/payment")
+async def update_payment(
+    request: Request,
+    deal_id: int,
+    data: PaymentUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_owner),
+):
+    """Update deal payment statuses (owner only)."""
+    deal = await db.get(DetectedDeal, deal_id)
+    if not deal:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Deal not found",
+        )
+
+    changes = {}
+    if data.buyer_payment_status is not None:
+        deal.buyer_payment_status = data.buyer_payment_status
+        changes["buyer_payment_status"] = data.buyer_payment_status
+    if data.seller_payment_status is not None:
+        deal.seller_payment_status = data.seller_payment_status
+        changes["seller_payment_status"] = data.seller_payment_status
+    if data.our_commission_status is not None:
+        deal.our_commission_status = data.our_commission_status
+        changes["our_commission_status"] = data.our_commission_status
+    if data.payment_method is not None:
+        deal.payment_method = data.payment_method
+        changes["payment_method"] = data.payment_method
+
+    if not changes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No fields to update",
+        )
+
+    await log_action(
+        db=db,
+        user_id=current_user.id,
+        action=AuditAction.UPDATE_PAYMENT,
+        target_type="deal",
+        target_id=deal_id,
+        action_metadata=changes,
+        ip_address=get_client_ip(request),
+    )
+
+    await db.commit()
+    return {"success": True, "updated": changes}
 
 
 # IMPORTANT: This route MUST be after all other /{deal_id}/... routes

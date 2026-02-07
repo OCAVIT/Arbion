@@ -32,6 +32,10 @@ class AuditAction(str, Enum):
     UPDATE_SETTINGS = "update_settings"
     LEAVE_CHAT = "leave_chat"
     BLACKLIST_CHAT = "blacklist_chat"
+    SEND_DRAFT = "send_draft"
+    SKIP_LEAD = "skip_lead"
+    CREATE_LEAD = "create_lead"
+    UPDATE_PAYMENT = "update_payment"
 
 
 class AuditLog(Base):

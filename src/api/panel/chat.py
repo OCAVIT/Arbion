@@ -27,7 +27,9 @@ from src.models import (
     OutboxMessage,
     User,
 )
+from src.schemas.copilot import SuggestedResponses
 from src.schemas.deal import DealCloseRequest, MessageResponse, SendMessageRequest
+from src.services.ai_copilot import copilot
 
 
 class NotesRequest(BaseModel):
@@ -409,3 +411,57 @@ async def close_deal(
         "success": True,
         "message": "Сделка закрыта" if data.status == "won" else "Сделка отменена",
     }
+
+
+@router.get("/{negotiation_id}/suggestions", response_model=SuggestedResponses)
+async def get_suggestions(
+    negotiation_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_manager),
+):
+    """Get AI-suggested response variants for the current negotiation."""
+    result = await db.execute(
+        select(Negotiation)
+        .options(selectinload(Negotiation.deal))
+        .where(Negotiation.id == negotiation_id)
+    )
+    negotiation = result.scalar_one_or_none()
+
+    if not negotiation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Переговоры не найдены",
+        )
+
+    if negotiation.deal.manager_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="У вас нет доступа к этой сделке",
+        )
+
+    # Get last message from counterparty
+    last_msg_result = await db.execute(
+        select(NegotiationMessage)
+        .where(
+            NegotiationMessage.negotiation_id == negotiation_id,
+            NegotiationMessage.role != MessageRole.MANAGER,
+        )
+        .order_by(NegotiationMessage.created_at.desc())
+        .limit(1)
+    )
+    last_msg = last_msg_result.scalar_one_or_none()
+    last_text = last_msg.content if last_msg else ""
+
+    variants = await copilot.suggest_responses(negotiation_id, last_text, db)
+
+    # Build margin info if deal has data
+    deal = negotiation.deal
+    margin_info = None
+    if deal.margin and deal.sell_price and deal.sell_price > 0:
+        margin_pct = float(deal.margin / deal.sell_price * 100)
+        margin_info = f"Текущая маржа: {float(deal.margin):.0f}₽ ({margin_pct:.1f}%)"
+
+    return SuggestedResponses(
+        variants=variants if variants else [],
+        margin_info=margin_info,
+    )
