@@ -5,6 +5,9 @@ Unit tests for AI negotiator improvements:
 - _products_match
 - _extract_preferences_from_text
 - detect_missing_fields with buyer_preferences
+- build_conversation_summary
+- _detect_unanswered_question
+- extract_price with dot-separator
 """
 
 import os
@@ -22,9 +25,11 @@ from src.services.ai_negotiator import (
     detect_missing_fields,
     _extract_preferences_from_text,
     _analyze_discussed_topics,
+    build_conversation_summary,
+    _detect_unanswered_question,
 )
 from src.services.llm import build_seller_system_prompt, build_buyer_system_prompt
-from src.services.message_handler import _products_match
+from src.services.message_handler import _products_match, extract_price
 
 
 # =====================================================
@@ -113,23 +118,25 @@ class TestCollectKnownData:
 # =====================================================
 
 class TestBuildSellerSystemPrompt:
-    def test_known_region_not_in_strategy(self):
+    def test_known_region_not_in_missing(self):
         prompt = build_seller_system_prompt(
             known_data={"region": "Москва"},
             missing_fields=["condition", "specs"],
         )
         assert "Москва" in prompt
-        assert "Узнай город" not in prompt
+        # "город продавца" should only appear in the "known" section, not in the "need to learn" section
+        need_section = prompt.lower().split("нужно узнать")[-1] if "нужно узнать" in prompt.lower() else ""
+        assert "город" not in need_section.split("примеры")[0]
 
     def test_all_known_ask_phone(self):
         prompt = build_seller_system_prompt(
             known_data={"region": "Москва", "condition": "идеал", "specs": "128гб", "price": "50000"},
             missing_fields=[],
         )
-        assert "попросить номер телефона" in prompt
+        assert "номер телефона" in prompt
         assert "НЕ ПРОСИ ТЕЛЕФОН" not in prompt
 
-    def test_missing_condition_in_strategy(self):
+    def test_missing_condition_in_prompt(self):
         prompt = build_seller_system_prompt(
             known_data={},
             missing_fields=["condition", "city"],
@@ -143,6 +150,34 @@ class TestBuildSellerSystemPrompt:
             missing_fields=["condition"],
         )
         assert "б/у техники" not in prompt
+
+    def test_no_strict_order(self):
+        prompt = build_seller_system_prompt(
+            known_data={},
+            missing_fields=["condition", "city", "specs"],
+        )
+        assert "СТРОГО по порядку" not in prompt
+
+    def test_personality_present(self):
+        prompt = build_seller_system_prompt(known_data={}, missing_fields=["condition"])
+        assert "обычный человек" in prompt
+
+    def test_conversation_summary_included(self):
+        summary = "1. Ты: привет → Собеседник: да"
+        prompt = build_seller_system_prompt(
+            known_data={}, missing_fields=["condition"],
+            conversation_summary=summary,
+        )
+        assert "КРАТКОЕ СОДЕРЖАНИЕ" in prompt
+        assert summary in prompt
+
+    def test_examples_present(self):
+        prompt = build_seller_system_prompt(known_data={}, missing_fields=["condition"])
+        assert "ты бот?" in prompt.lower()
+
+    def test_respond_to_questions_instruction(self):
+        prompt = build_seller_system_prompt(known_data={}, missing_fields=[])
+        assert "СНАЧАЛА ответь" in prompt or "ответь на него" in prompt
 
 
 # =====================================================
@@ -164,6 +199,26 @@ class TestBuildBuyerSystemPrompt:
             missing_fields=["preferences"],
         )
         assert "НИКОГДА не называй конкретную цену" in prompt
+
+    def test_no_strict_order(self):
+        prompt = build_buyer_system_prompt(
+            known_data={},
+            missing_fields=["preferences", "city", "price"],
+        )
+        assert "СТРОГО по порядку" not in prompt
+
+    def test_buyer_examples_present(self):
+        prompt = build_buyer_system_prompt(known_data={}, missing_fields=["price"])
+        assert "130.000" in prompt or "130к" in prompt.lower()
+
+    def test_conversation_summary_included(self):
+        summary = "1. Ты: привет → Собеседник: да"
+        prompt = build_buyer_system_prompt(
+            known_data={}, missing_fields=["price"],
+            conversation_summary=summary,
+        )
+        assert "КРАТКОЕ СОДЕРЖАНИЕ" in prompt
+        assert summary in prompt
 
 
 # =====================================================
@@ -271,3 +326,116 @@ class TestAnalyzeDiscussedTopics:
         context = [{"role": "seller", "content": "модель 2024 года, размер XL"}]
         discussed = _analyze_discussed_topics(context)
         assert "specs" in discussed
+
+
+# =====================================================
+# Tests: build_conversation_summary
+# =====================================================
+
+class TestBuildConversationSummary:
+    def test_empty_context(self):
+        assert build_conversation_summary([]) == ""
+
+    def test_single_message(self):
+        assert build_conversation_summary([{"role": "ai", "content": "привет"}]) == ""
+
+    def test_paired_exchange(self):
+        ctx = [
+            {"role": "ai", "content": "привет, товар актуален?"},
+            {"role": "seller", "content": "да, продаю"},
+        ]
+        result = build_conversation_summary(ctx)
+        assert "Ты:" in result
+        assert "Собеседник:" in result
+
+    def test_unanswered_question_flagged(self):
+        ctx = [
+            {"role": "ai", "content": "привет, товар актуален?"},
+            {"role": "seller", "content": "да"},
+            {"role": "ai", "content": "состояние какое?"},
+            {"role": "seller", "content": "ты бот?"},
+        ]
+        result = build_conversation_summary(ctx)
+        assert "НЕ ОТВЕЧЕНО" in result
+
+    def test_normal_conversation_no_flags(self):
+        ctx = [
+            {"role": "ai", "content": "привет, товар актуален?"},
+            {"role": "seller", "content": "да, продаю"},
+            {"role": "ai", "content": "состояние какое?"},
+            {"role": "seller", "content": "идеальное"},
+        ]
+        result = build_conversation_summary(ctx)
+        assert "НЕ ОТВЕЧЕНО" not in result
+
+    def test_multiple_exchanges(self):
+        ctx = [
+            {"role": "ai", "content": "привет"},
+            {"role": "seller", "content": "привет"},
+            {"role": "ai", "content": "состояние?"},
+            {"role": "seller", "content": "идеал"},
+            {"role": "ai", "content": "город?"},
+            {"role": "seller", "content": "москва"},
+        ]
+        result = build_conversation_summary(ctx)
+        lines = result.strip().split("\n")
+        assert len(lines) == 3
+        assert "1." in lines[0]
+        assert "2." in lines[1]
+        assert "3." in lines[2]
+
+
+# =====================================================
+# Tests: _detect_unanswered_question
+# =====================================================
+
+class TestDetectUnansweredQuestion:
+    def test_question_mark(self):
+        ctx = [{"role": "seller", "content": "ты бот?"}]
+        assert _detect_unanswered_question(ctx) is not None
+
+    def test_question_keyword(self):
+        ctx = [{"role": "seller", "content": "ты бот что ли"}]
+        result = _detect_unanswered_question(ctx)
+        assert result is not None
+
+    def test_no_question(self):
+        ctx = [{"role": "seller", "content": "да, продаю"}]
+        assert _detect_unanswered_question(ctx) is None
+
+    def test_ai_last_message(self):
+        ctx = [{"role": "ai", "content": "как дела?"}]
+        assert _detect_unanswered_question(ctx) is None
+
+    def test_empty_context(self):
+        assert _detect_unanswered_question([]) is None
+
+    def test_why_question(self):
+        ctx = [{"role": "buyer", "content": "а почему так дорого"}]
+        result = _detect_unanswered_question(ctx)
+        assert result is not None
+
+
+# =====================================================
+# Tests: extract_price with dot-separator
+# =====================================================
+
+class TestExtractPriceDotSeparator:
+    def test_130_000(self):
+        assert extract_price("бюджет 130.000") == Decimal("130000")
+
+    def test_1_500_000(self):
+        assert extract_price("цена 1.500.000") == Decimal("1500000")
+
+    def test_50_000(self):
+        assert extract_price("отдам за 50.000") == Decimal("50000")
+
+    def test_regular_130k(self):
+        assert extract_price("130к") == Decimal("130000")
+
+    def test_regular_50000(self):
+        assert extract_price("цена 50000") == Decimal("50000")
+
+    def test_small_decimal_not_price(self):
+        # "3.5" should not be a valid price (too small)
+        assert extract_price("3.5 кг") is None

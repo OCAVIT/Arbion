@@ -69,6 +69,9 @@ PRODUCT_PATTERNS = [
 
 # Price patterns - more specific to avoid matching model numbers
 PRICE_PATTERNS = [
+    # Dot-as-thousand-separator: "130.000", "1.500.000" (Russian convention)
+    # Must be first to match before explicit markers split "1.500.000" into "1.500"
+    r'(\d{1,3}(?:\.\d{3})+)',
     # Explicit price markers: "цена 100к", "за 50 тыс", "стоит 30000"
     r'(?:цена|за|стоит|стоимость|прошу|отдам за|продам за|продаю за|хочу)[:\s]*(\d[\d\s]*(?:[.,]\d+)?)\s*(?:т\.?р\.?|тыс\.?|к|руб|р|₽|\$)?',
     # Shorthand with multiplier: "100к", "50 тыс", "30т.р.", "100 к" (разрешаем пробел перед к)
@@ -306,7 +309,12 @@ def extract_price(text: str) -> Optional[Decimal]:
     for pattern in PRICE_PATTERNS:
         for match in re.finditer(pattern, text_lower):
             try:
-                price_str = match.group(1).replace(' ', '').replace(',', '.')
+                price_str = match.group(1).replace(' ', '')
+                # Detect dot-as-thousand-separator: "130.000" → "130000"
+                if re.match(r'^\d{1,3}(\.\d{3})+$', price_str):
+                    price_str = price_str.replace('.', '')
+                else:
+                    price_str = price_str.replace(',', '.')
                 price = Decimal(price_str)
 
                 # Проверяем множитель 'к' или 'тыс'

@@ -28,30 +28,69 @@ def _get_client() -> Optional[AsyncOpenAI]:
 # DYNAMIC PROMPT BUILDERS
 # =====================================================
 
+_PERSONALITY = """\
+Ты — обычный человек, общаешься в Telegram. Ты НЕ бот и НЕ ИИ. \
+Если спросят "ты бот?" — скажи что нет, ищешь для себя или для друга. \
+Веди себя как живой человек: реагируй на слова собеседника, шутки, вопросы."""
+
 _COMMON_RULES = """\
 Правила общения:
-- Пиши КОРОТКО, 1-2 предложения максимум, как реальный человек в мессенджере
+- Пиши КОРОТКО, 1-2 предложения, как реальный человек в мессенджере
 - Без эмодзи, без капса, без восклицательных знаков
 - Пиши строчными буквами, можно без точек — как в обычном чате
 - НЕ представляйся, НЕ называй своё имя
-- НЕ говори что ты бот или ИИ
-- НИКОГДА не спрашивай то, что тебе УЖЕ ИЗВЕСТНО — читай секцию "УЖЕ ИЗВЕСТНО"
-- НЕ повторяй вопросы, которые уже были в диалоге — перечитай историю ПЕРЕД ответом
-- Если собеседник уже ответил на вопрос — ЗАПРЕЩЕНО спрашивать снова
-- Если собеседник задаёт вопрос — СНАЧАЛА коротко ответь на него, потом задай свой"""
+- НИКОГДА не спрашивай то, что тебе УЖЕ ИЗВЕСТНО
+- НЕ повторяй вопросы из истории диалога, даже перефразированные
+
+Критически важно:
+- Если собеседник задаёт вопрос — СНАЧАЛА ответь на него, ПОТОМ плавно переходи к своему
+- НЕ игнорируй вопросы и реплики собеседника
+- НЕ задавай расплывчатые вопросы типа "какие-нибудь нюансы есть?" или "а по параметрам что скажешь?"
+- Спрашивай КОНКРЕТНО: "состояние как, есть повреждения?" вместо "нюансы есть?"
+- Реагируй на то что человек написал, прокомментируй кратко, потом задай вопрос
+- Если собеседник растерян или раздражён — признай это ("сорри, неудачно спросил") и переформулируй"""
+
+_SELLER_EXAMPLES = """\
+
+Примеры хороших ответов:
+Продавец: "да" → "отлично, а состояние как? повреждения есть?"
+Продавец: "в айфоне?" → "да, в айфоне) расскажи что по состоянию"
+Продавец: "ты бот?" → "нет, для друга ищу) так что по состоянию как?"
+Продавец: "10к скидки не будет" → "понял, ок. а в каком городе забирать?"
+
+Примеры ПЛОХИХ ответов (НИКОГДА так не пиши):
+- "ок, а ещё какие-нибудь нюансы есть?" — слишком расплывчато
+- "а по параметрам что можешь сказать?" — звучит шаблонно, как бот
+- Игнорировать вопрос собеседника и задавать свой"""
+
+_BUYER_EXAMPLES = """\
+
+Примеры хороших ответов:
+Покупатель: "да" → "отлично, а какой вариант интересует?"
+Покупатель: "а сколько стоит?" → "зависит от комплектации, а ты на какой бюджет смотришь?"
+Покупатель: "130.000" → "понял, подходит. а ты в каком городе?"
+Покупатель: "я ведь написал 130к" → "точно, извини. 130к понял. а город какой?"
+
+Примеры ПЛОХИХ ответов (НИКОГДА так не пиши):
+- "по сумме что-нибудь подойдёт? какой бюджет?" — два вопроса сразу, звучит как бот
+- Спрашивать бюджет если покупатель его уже назвал
+- Называть конкретную цену товара"""
 
 
 def build_seller_system_prompt(
     known_data: Optional[Dict[str, str]] = None,
     missing_fields: Optional[List[str]] = None,
+    conversation_summary: Optional[str] = None,
 ) -> str:
     """Build dynamic system prompt for talking TO a seller."""
     known = known_data or {}
     missing = missing_fields or []
 
     parts = [
-        "Ты — заинтересованный покупатель, ведёшь переписку в Telegram. "
-        "Твоя задача: узнать максимум информации о товаре и только после этого получить номер телефона для созвона.",
+        _PERSONALITY,
+        "",
+        "Ты — покупатель, ведёшь переписку с продавцом в Telegram. "
+        "Цель: узнать детали о товаре и договориться о созвоне.",
         "",
         _COMMON_RULES,
     ]
@@ -69,32 +108,32 @@ def build_seller_system_prompt(
 
     if known_lines:
         parts.append("")
-        parts.append("УЖЕ ИЗВЕСТНО (НЕ спрашивай об этом):")
+        parts.append("УЖЕ ИЗВЕСТНО (НЕ спрашивай об этом повторно!):")
         for line in known_lines:
             parts.append(f"- {line}")
 
-    # Dynamic strategy — only missing fields
-    strategy_steps = []
-    step = 1
-    if "condition" in missing:
-        strategy_steps.append(f"{step}. Узнай состояние товара (дефекты, нюансы)")
-        step += 1
-    if "city" in missing:
-        strategy_steps.append(f"{step}. Узнай город продавца")
-        step += 1
-    if "specs" in missing:
-        strategy_steps.append(f"{step}. Узнай основные характеристики товара")
-        step += 1
-    if "price" in missing:
-        strategy_steps.append(f"{step}. Обсуди цену (попроси скидку если уместно)")
-        step += 1
+    # Conversation summary (memory)
+    if conversation_summary:
+        parts.append("")
+        parts.append("КРАТКОЕ СОДЕРЖАНИЕ ДИАЛОГА:")
+        parts.append(conversation_summary)
 
-    if strategy_steps:
+    # What's still needed — soft guidance, NOT rigid checklist
+    if missing:
+        field_labels = {
+            "condition": "состояние товара (есть повреждения?)",
+            "city": "город продавца",
+            "specs": "характеристики (конфигурация, комплект)",
+            "price": "цену",
+        }
         parts.append("")
-        parts.append("Стратегия (СТРОГО по порядку, спрашивай по одному):")
-        parts.extend(strategy_steps)
-        parts.append(f"{step}. ТОЛЬКО ПОСЛЕ всего вышеперечисленного — попроси номер телефона")
+        parts.append("Тебе ещё нужно узнать:")
+        for field in missing:
+            label = field_labels.get(field, field)
+            parts.append(f"- {label}")
         parts.append("")
+        parts.append("Задавай эти вопросы ЕСТЕСТВЕННО по ходу разговора, по одному.")
+        parts.append("Когда узнаешь всё — предложи созвониться и попроси номер телефона.")
         missing_labels = []
         if "condition" in missing:
             missing_labels.append("состояние")
@@ -104,17 +143,19 @@ def build_seller_system_prompt(
             missing_labels.append("характеристики")
         if "price" in missing:
             missing_labels.append("цену")
-        parts.append(f"ОБЯЗАТЕЛЬНО — НЕ ПРОСИ ТЕЛЕФОН пока не узнал: {', '.join(missing_labels)}.")
+        parts.append(f"НЕ ПРОСИ ТЕЛЕФОН пока не узнал: {', '.join(missing_labels)}.")
     else:
         parts.append("")
-        parts.append("Вся необходимая информация собрана — можешь попросить номер телефона для созвона.")
+        parts.append("Вся информация собрана. Предложи созвониться и попроси номер телефона.")
+
+    parts.append(_SELLER_EXAMPLES)
 
     parts.append("")
     parts.append('Ответ строго в JSON (без markdown, без ```):\n{"action": "respond", "message": "текст ответа", "phone": null}')
     parts.append("")
     parts.append("Значения action:")
-    parts.append('- "respond" — продолжить диалог (написать сообщение)')
-    parts.append('- "close" — продавец отказал/товар продан, вежливо прощаемся')
+    parts.append('- "respond" — продолжить диалог')
+    parts.append('- "close" — продавец отказал/товар продан, вежливо попрощайся')
     parts.append('- "warm" — получили номер телефона (извлеки его в поле phone)')
 
     return "\n".join(parts)
@@ -123,22 +164,27 @@ def build_seller_system_prompt(
 def build_buyer_system_prompt(
     known_data: Optional[Dict[str, str]] = None,
     missing_fields: Optional[List[str]] = None,
+    conversation_summary: Optional[str] = None,
 ) -> str:
     """Build dynamic system prompt for talking TO a buyer."""
     known = known_data or {}
     missing = missing_fields or []
 
     parts = [
+        _PERSONALITY,
+        "",
         "Ты — продавец/посредник, нашёл товар по запросу покупателя и пишешь ему в Telegram. "
-        "Твоя задача: подтвердить интерес, узнать детали и только потом получить контакт.",
+        "Цель: подтвердить интерес, узнать детали и получить контакт.",
         "",
         _COMMON_RULES,
+        "",
+        "Дополнительные правила для покупателя:",
         "- НИКОГДА не называй конкретную цену или стоимость товара",
         "- Если покупатель спрашивает цену — спроси на какой бюджет он рассчитывает",
-        "- Цена — это внутренняя информация, покупатель НЕ должен её знать",
+        "- Цена — внутренняя информация, покупатель НЕ должен её знать",
         "- НЕ спрашивай про состояние товара — ТЫ его ПРОДАЁШЬ, а не покупаешь",
-        "- НЕ спрашивай про дефекты, царапины, комплект — это вопросы к продавцу, не к покупателю",
-        "- Если покупатель спрашивает о товаре — ответь, используя ИНФОРМАЦИЮ О ТОВАРЕ (если есть), потом задай свой вопрос",
+        "- НЕ спрашивай про дефекты, царапины, комплект — это вопросы покупателя к тебе, а не наоборот",
+        "- Если покупатель спрашивает о товаре — ответь используя ИНФОРМАЦИЮ О ТОВАРЕ (если есть)",
     ]
 
     # Known data section
@@ -152,29 +198,31 @@ def build_buyer_system_prompt(
 
     if known_lines:
         parts.append("")
-        parts.append("УЖЕ ИЗВЕСТНО (НЕ спрашивай об этом):")
+        parts.append("УЖЕ ИЗВЕСТНО (НЕ спрашивай об этом повторно!):")
         for line in known_lines:
             parts.append(f"- {line}")
 
-    # Dynamic strategy — only missing fields
-    strategy_steps = []
-    step = 1
-    if "preferences" in missing:
-        strategy_steps.append(f"{step}. Узнай предпочтения покупателя (что именно интересует)")
-        step += 1
-    if "city" in missing:
-        strategy_steps.append(f"{step}. Узнай город покупателя")
-        step += 1
-    if "price" in missing:
-        strategy_steps.append(f"{step}. Узнай бюджет (на какую сумму рассчитывает)")
-        step += 1
+    # Conversation summary (memory)
+    if conversation_summary:
+        parts.append("")
+        parts.append("КРАТКОЕ СОДЕРЖАНИЕ ДИАЛОГА:")
+        parts.append(conversation_summary)
 
-    if strategy_steps:
+    # What's still needed — soft guidance
+    if missing:
+        field_labels = {
+            "preferences": "предпочтения покупателя (что именно интересует)",
+            "city": "город покупателя",
+            "price": "бюджет (на какую сумму рассчитывает)",
+        }
         parts.append("")
-        parts.append("Стратегия (СТРОГО по порядку, спрашивай по одному):")
-        parts.extend(strategy_steps)
-        parts.append(f"{step}. ТОЛЬКО ПОСЛЕ всего вышеперечисленного — попроси номер телефона")
+        parts.append("Тебе ещё нужно узнать:")
+        for field in missing:
+            label = field_labels.get(field, field)
+            parts.append(f"- {label}")
         parts.append("")
+        parts.append("Задавай эти вопросы ЕСТЕСТВЕННО по ходу разговора, по одному.")
+        parts.append("Когда узнаешь всё — предложи созвониться и попроси номер телефона.")
         missing_labels = []
         if "preferences" in missing:
             missing_labels.append("предпочтения")
@@ -182,10 +230,12 @@ def build_buyer_system_prompt(
             missing_labels.append("город")
         if "price" in missing:
             missing_labels.append("бюджет")
-        parts.append(f"ОБЯЗАТЕЛЬНО — НЕ ПРОСИ ТЕЛЕФОН пока не узнал: {', '.join(missing_labels)}.")
+        parts.append(f"НЕ ПРОСИ ТЕЛЕФОН пока не узнал: {', '.join(missing_labels)}.")
     else:
         parts.append("")
-        parts.append("Вся необходимая информация собрана — можешь попросить номер телефона для связи.")
+        parts.append("Вся информация собрана. Предложи созвониться и попроси номер телефона.")
+
+    parts.append(_BUYER_EXAMPLES)
 
     parts.append("")
     parts.append('Ответ строго в JSON (без markdown, без ```):\n{"action": "respond", "message": "текст ответа", "phone": null}')
@@ -311,6 +361,7 @@ async def generate_negotiation_response(
     cross_context: Optional[str] = None,
     known_data: Optional[Dict[str, str]] = None,
     missing_fields: Optional[List[str]] = None,
+    conversation_summary: Optional[str] = None,
 ) -> Optional[dict]:
     """
     Generate a negotiation response using OpenAI.
@@ -325,6 +376,7 @@ async def generate_negotiation_response(
         cross_context: info from the other side of the deal
         known_data: already collected data dict
         missing_fields: list of still-missing field names
+        conversation_summary: structured summary of dialog for LLM memory
 
     Returns:
         {'action': 'respond'|'close'|'warm', 'message': str, 'phone': str|None}
@@ -337,9 +389,9 @@ async def generate_negotiation_response(
     # Use dynamic prompt if known_data provided, otherwise static fallback
     if known_data is not None or missing_fields is not None:
         if role == "seller":
-            system_prompt = build_seller_system_prompt(known_data, missing_fields)
+            system_prompt = build_seller_system_prompt(known_data, missing_fields, conversation_summary)
         else:
-            system_prompt = build_buyer_system_prompt(known_data, missing_fields)
+            system_prompt = build_buyer_system_prompt(known_data, missing_fields, conversation_summary)
     else:
         system_prompt = SELLER_SYSTEM_PROMPT if role == "seller" else BUYER_SYSTEM_PROMPT
 
@@ -357,7 +409,7 @@ async def generate_negotiation_response(
             model=settings.openai_model,
             messages=messages,
             temperature=0.7,
-            max_tokens=200,
+            max_tokens=250,
         )
         text = response.choices[0].message.content
         result = _parse_llm_response(text)
@@ -366,6 +418,48 @@ async def generate_negotiation_response(
         return result
     except Exception as e:
         logger.error(f"OpenAI API error: {e}")
+        return None
+
+
+async def generate_simple_response(
+    context: List[dict],
+    unanswered_question: Optional[str] = None,
+) -> Optional[dict]:
+    """
+    Tier-2 fallback: simplified LLM call when primary prompt fails.
+    Uses a minimal prompt focused on natural conversation continuation.
+    """
+    client = _get_client()
+    if not client:
+        return None
+
+    prompt = (
+        "Ты ведёшь переписку в Telegram как обычный человек. "
+        "Продолжи диалог естественно. "
+        "Если собеседник задал вопрос — обязательно ответь на него. "
+        "Пиши коротко, 1-2 предложения, строчными буквами, без эмодзи. "
+        'Ответ в JSON: {"action": "respond", "message": "текст", "phone": null}'
+    )
+
+    if unanswered_question:
+        prompt += f"\n\nВАЖНО: собеседник спросил: '{unanswered_question[:100]}' — ответь на это!"
+
+    messages = [{"role": "system", "content": prompt}]
+    # Only use last 6 messages for simplicity
+    for msg in context[-6:]:
+        oai_role = "assistant" if msg["role"] == "ai" else "user"
+        messages.append({"role": oai_role, "content": msg["content"]})
+
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.7,
+            max_tokens=100,
+        )
+        return _parse_llm_response(response.choices[0].message.content)
+    except Exception as e:
+        logger.warning(f"Tier-2 LLM fallback failed: {e}")
         return None
 
 

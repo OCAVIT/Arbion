@@ -273,6 +273,82 @@ def _analyze_discussed_topics(context: List[dict]) -> set:
     return discussed
 
 
+def build_conversation_summary(context: List[dict]) -> str:
+    """
+    Build a short structured summary of the conversation for the LLM's memory section.
+
+    Each exchange is compressed to one line. Unanswered questions from the counterparty
+    are flagged with (НЕ ОТВЕЧЕНО).
+
+    Returns:
+        Multi-line summary string, or empty string if context has < 2 messages.
+    """
+    if len(context) < 2:
+        return ""
+
+    lines = []
+    step = 0
+    i = 0
+    _question_markers = ["?", "ты бот", "кто ты", "почему", "зачем", "откуда", "сколько"]
+
+    while i < len(context):
+        msg = context[i]
+        role_label = "Ты" if msg["role"] == "ai" else "Собеседник"
+        content_short = msg["content"][:80].replace("\n", " ")
+
+        # Try to pair with next message if roles differ
+        if i + 1 < len(context) and context[i]["role"] != context[i + 1]["role"]:
+            next_msg = context[i + 1]
+            next_role = "Ты" if next_msg["role"] == "ai" else "Собеседник"
+            next_content = next_msg["content"][:80].replace("\n", " ")
+            step += 1
+            # Check if the counterparty's response contains an unanswered question
+            counterparty_msg = next_msg if next_msg["role"] != "ai" else msg
+            has_question = any(m in counterparty_msg["content"].lower() for m in _question_markers)
+            # Flag if counterparty asked a question AND it's the last pair (no AI response after)
+            if has_question and counterparty_msg["role"] != "ai" and i + 2 >= len(context):
+                lines.append(
+                    f"{step}. {role_label}: {content_short} → {next_role}: {next_content} "
+                    f"→ (НЕ ОТВЕЧЕНО — ответь!)"
+                )
+            else:
+                lines.append(f"{step}. {role_label}: {content_short} → {next_role}: {next_content}")
+            i += 2
+            continue
+
+        # Unpaired message
+        step += 1
+        is_question = any(m in msg["content"].lower() for m in _question_markers)
+        if msg["role"] != "ai" and is_question:
+            lines.append(f"{step}. Собеседник спросил: {content_short} → (НЕ ОТВЕЧЕНО — ответь!)")
+        else:
+            lines.append(f"{step}. {role_label}: {content_short}")
+        i += 1
+
+    return "\n".join(lines)
+
+
+def _detect_unanswered_question(context: List[dict]) -> Optional[str]:
+    """
+    Check if the last non-AI message contains a question that hasn't been answered.
+
+    Returns the question text if found, None otherwise.
+    """
+    if not context:
+        return None
+
+    last_msg = context[-1]
+    if last_msg["role"] == "ai":
+        return None
+
+    text = last_msg["content"]
+    question_markers = ["?", "ты бот", "кто ты", "почему", "зачем", "откуда"]
+    if any(marker in text.lower() for marker in question_markers):
+        return text
+
+    return None
+
+
 def detect_missing_fields(deal, target: str, context: Optional[List[dict]] = None) -> dict:
     """
     Определяет, каких данных не хватает в сделке/заявке.
@@ -984,6 +1060,9 @@ async def process_seller_response(
         listing_text = sell_order.raw_text if sell_order else None
         cross_ctx = await build_cross_context(deal, "seller", db)
 
+        # Build conversation summary for LLM memory
+        conversation_summary = build_conversation_summary(context)
+
         # Пробуем LLM, fallback на шаблоны
         llm_result = await llm.generate_negotiation_response(
             role="seller",
@@ -995,14 +1074,20 @@ async def process_seller_response(
             cross_context=cross_ctx,
             known_data=known_data,
             missing_fields=seller_missing["missing"],
+            conversation_summary=conversation_summary,
         )
+
+        if not llm_result:
+            # Tier-2: try simpler LLM call before falling back to templates
+            unanswered = _detect_unanswered_question(context)
+            llm_result = await llm.generate_simple_response(context, unanswered)
 
         if llm_result:
             action = llm_result["action"]
             response = llm_result["message"]
             phone = llm_result.get("phone")
         else:
-            # Fallback на старую логику
+            # Tier-3: template fallback
             last_ai_msg = ""
             for msg in reversed(context):
                 if msg['role'] == 'ai':
@@ -1010,6 +1095,12 @@ async def process_seller_response(
                     break
             sentiment, phone = analyze_response(response_text, last_ai_msg)
             action, response = determine_next_action(sentiment, phone, context, negotiation.stage, target="seller", missing_fields=seller_missing["missing"])
+
+            # If counterparty asked a question, prepend acknowledgment to template
+            unanswered = _detect_unanswered_question(context)
+            if unanswered and response and action == 'respond':
+                ack = random.choice(["понял. ", "ок. ", "да, "])
+                response = ack + response
 
         # Safety net: regex-проверка на телефон в тексте продавца
         regex_phone = extract_phone_from_text(response_text)
@@ -1167,6 +1258,9 @@ async def process_buyer_response(
         listing_text = buy_order.raw_text if buy_order else None
         cross_ctx = await build_cross_context(deal, "buyer", db)
 
+        # Build conversation summary for LLM memory
+        conversation_summary = build_conversation_summary(context)
+
         # Пробуем LLM, fallback на шаблоны (цена НЕ передаётся покупателю)
         llm_result = await llm.generate_negotiation_response(
             role="buyer",
@@ -1178,13 +1272,20 @@ async def process_buyer_response(
             cross_context=cross_ctx,
             known_data=known_data,
             missing_fields=buyer_missing["missing"],
+            conversation_summary=conversation_summary,
         )
+
+        if not llm_result:
+            # Tier-2: try simpler LLM call before falling back to templates
+            unanswered = _detect_unanswered_question(context)
+            llm_result = await llm.generate_simple_response(context, unanswered)
 
         if llm_result:
             action = llm_result["action"]
             response = llm_result["message"]
             phone = llm_result.get("phone")
         else:
+            # Tier-3: template fallback
             last_ai_msg = ""
             for msg in reversed(context):
                 if msg['role'] == 'ai':
@@ -1192,6 +1293,12 @@ async def process_buyer_response(
                     break
             sentiment, phone = analyze_response(response_text, last_ai_msg)
             action, response = determine_next_action(sentiment, phone, context, negotiation.stage, target="buyer", missing_fields=buyer_missing["missing"])
+
+            # If counterparty asked a question, prepend acknowledgment to template
+            unanswered = _detect_unanswered_question(context)
+            if unanswered and response and action == 'respond':
+                ack = random.choice(["понял. ", "ок. ", "да, "])
+                response = ack + response
 
         # Safety net: regex-проверка на телефон
         regex_phone = extract_phone_from_text(response_text)
