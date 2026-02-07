@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.models import DealStatus, DetectedDeal, SystemSetting, User, UserRole
+from src.services.commission import calculate_commission_rate
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,7 @@ async def assign_deal_to_manager(deal_id: int, db: AsyncSession) -> bool:
     deal.manager_id = selected_manager.id
     deal.assigned_at = datetime.now(timezone.utc)
     deal.status = DealStatus.HANDED_TO_MANAGER
+    deal.manager_commission_rate = calculate_commission_rate(deal, selected_manager)
 
     await db.commit()
 

@@ -36,6 +36,7 @@ from src.schemas.deal import (
     OwnerDealResponse,
     SendMessageRequest,
 )
+from src.services.commission import calculate_commission_rate
 from src.utils.audit import get_client_ip, log_action
 
 router = APIRouter(prefix="/deals")
@@ -305,6 +306,7 @@ async def assign_deal(
     deal.manager_id = manager.id
     deal.assigned_at = datetime.now(timezone.utc)
     deal.status = DealStatus.HANDED_TO_MANAGER
+    deal.manager_commission_rate = calculate_commission_rate(deal, manager)
 
     await log_action(
         db=db,
@@ -312,7 +314,7 @@ async def assign_deal(
         action=AuditAction.UPDATE_DEAL,
         target_type="deal",
         target_id=deal_id,
-        action_metadata={"action": "assign", "manager_id": manager.id},
+        action_metadata={"action": "assign", "manager_id": manager.id, "commission_rate": str(deal.manager_commission_rate)},
         ip_address=get_client_ip(request),
     )
 
@@ -468,15 +470,15 @@ async def close_deal(
 
     # Create ledger entry for won deals
     if deal.status == DealStatus.WON:
-        profit = deal.margin  # Or calculate actual profit
+        profit = deal.margin
         deal.profit = profit
 
-        # Calculate manager commission
+        # Calculate manager commission using tiered rate
         manager_commission = Decimal("0")
+        commission_rate = Decimal("0")
         if deal.manager_id:
-            manager = await db.get(User, deal.manager_id)
-            if manager and manager.commission_rate:
-                manager_commission = deal.margin * manager.commission_rate
+            commission_rate = deal.manager_commission_rate or Decimal("0.20")
+            manager_commission = deal.margin * commission_rate
 
         ledger = LedgerEntry(
             deal_id=deal.id,
@@ -485,6 +487,9 @@ async def close_deal(
             profit=profit,
             closed_by_user_id=current_user.id,
             manager_commission=manager_commission,
+            commission_rate_applied=commission_rate if deal.manager_id else None,
+            deal_model=deal.deal_model,
+            lead_source=deal.lead_source,
         )
         db.add(ledger)
 

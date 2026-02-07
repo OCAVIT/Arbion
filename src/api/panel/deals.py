@@ -22,6 +22,7 @@ from src.models import (
     User,
 )
 from src.schemas.deal import ManagerDealListResponse, ManagerDealResponse
+from src.services.commission import calculate_commission_rate
 from src.utils.audit import get_client_ip, log_action
 
 router = APIRouter(prefix="/deals")
@@ -225,6 +226,7 @@ async def take_deal(
     deal.manager_id = current_user.id
     deal.assigned_at = datetime.now(timezone.utc)
     deal.status = DealStatus.HANDED_TO_MANAGER
+    deal.manager_commission_rate = calculate_commission_rate(deal, current_user)
 
     await log_action(
         db=db,
