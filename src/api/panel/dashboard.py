@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from src.auth.dependencies import require_manager
 from src.db import get_db
@@ -123,6 +124,10 @@ async def get_warm_pool(
     # Get unassigned warm and cold deals (cold = copilot mode new leads)
     result = await db.execute(
         select(DetectedDeal)
+        .options(
+            selectinload(DetectedDeal.negotiation),
+            selectinload(DetectedDeal.sell_order),
+        )
         .where(
             and_(
                 DetectedDeal.manager_id.is_(None),
