@@ -239,6 +239,24 @@ _SHORT_DENIAL_PATTERN = re.compile(
     rf'^[\s]*{_DENIAL_WORD}(?:[\s,.\-!]+{_DENIAL_WORD})?[\s,.\-!]*$', re.IGNORECASE
 )
 
+# Слова-проблемы, которые "нет" может отрицать: "дефектов нет" = позитив, не негатив
+_NEGATED_PROBLEM_STEMS = [
+    'дефект', 'царапин', 'скол', 'трещин', 'проблем',
+    'повреждени', 'косяк', 'нюанс', 'претензи', 'поломк', 'поломок',
+]
+
+
+def _is_negated_problem(text_lower: str) -> bool:
+    """Check if 'нет' negates a problem word (e.g., 'дефектов нет' = positive, not rejection)."""
+    for stem in _NEGATED_PROBLEM_STEMS:
+        # "дефектов нет", "царапин нет"
+        if re.search(rf'{stem}\w*\s+нет\b', text_lower):
+            return True
+        # "нет дефектов", "нет проблем"
+        if re.search(rf'\bнет\s+{stem}', text_lower):
+            return True
+    return False
+
 
 def _analyze_discussed_topics(context: List[dict]) -> set:
     """Scan conversation context for already discussed topics."""
@@ -452,9 +470,9 @@ def analyze_response(text: str, last_ai_message: str = "") -> Tuple[str, Optiona
             return 'contact', None
 
     # Контекстная проверка: если бот спрашивал о дефектах,
-    # а ответ — короткое "нет"/"нету"/"неа", это значит "нет проблем" = позитив
+    # а ответ — "нет"/"нету" или "дефектов нет"/"нет проблем", это значит "нет проблем" = позитив
     if last_ai_message and _is_condition_question(last_ai_message):
-        if _SHORT_DENIAL_PATTERN.match(text_lower):
+        if _SHORT_DENIAL_PATTERN.match(text_lower) or _is_negated_problem(text_lower):
             return 'positive', None
 
     # Проверка на явный негатив (продано, не продаю, и т.д.)
@@ -463,6 +481,9 @@ def analyze_response(text: str, last_ai_message: str = "") -> Tuple[str, Optiona
         if keyword == 'нет':
             # "нет" только как отдельное слово (не "нету", "нетак" и т.д.)
             if re.search(r'\bнет\b', text_lower) and not re.search(r'\bнету\b', text_lower):
+                # "дефектов нет" / "нет проблем" — это не отказ, а позитив
+                if _is_negated_problem(text_lower):
+                    continue
                 return 'negative', None
         elif keyword in text_lower:
             return 'negative', None

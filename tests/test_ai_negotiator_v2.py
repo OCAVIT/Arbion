@@ -21,10 +21,12 @@ os.environ.setdefault("TG_API_HASH", "test")
 os.environ.setdefault("TG_SESSION_STRING", "test")
 
 from src.services.ai_negotiator import (
+    analyze_response,
     collect_known_data,
     detect_missing_fields,
     _extract_preferences_from_text,
     _analyze_discussed_topics,
+    _is_negated_problem,
     build_conversation_summary,
     _detect_unanswered_question,
 )
@@ -439,3 +441,87 @@ class TestExtractPriceDotSeparator:
     def test_small_decimal_not_price(self):
         # "3.5" should not be a valid price (too small)
         assert extract_price("3.5 кг") is None
+
+
+# =====================================================
+# Tests: _is_negated_problem
+# =====================================================
+
+class TestIsNegatedProblem:
+    def test_defektov_net(self):
+        assert _is_negated_problem("дефектов нет") is True
+
+    def test_net_problem(self):
+        assert _is_negated_problem("нет проблем") is True
+
+    def test_tsarapin_net(self):
+        assert _is_negated_problem("царапин нет") is True
+
+    def test_net_povrezhdenii(self):
+        assert _is_negated_problem("нет повреждений") is True
+
+    def test_net_treschin(self):
+        assert _is_negated_problem("трещин нет, всё ок") is True
+
+    def test_plain_net_is_not_negated(self):
+        assert _is_negated_problem("нет") is False
+
+    def test_net_ne_prodayu(self):
+        assert _is_negated_problem("нет, не продаю") is False
+
+    def test_prodano_net(self):
+        assert _is_negated_problem("уже нет") is False
+
+
+# =====================================================
+# Tests: analyze_response — negated problem not negative
+# =====================================================
+
+class TestAnalyzeResponseNegatedProblem:
+    """The exact bug: 'да, работает, дефектов нет' was classified as 'negative'."""
+
+    def test_defektov_net_after_condition_question(self):
+        sentiment, phone = analyze_response(
+            "да, работает, дефектов нет",
+            last_ai_message="ок. хорошо, а всё работает? дефектов нет?",
+        )
+        assert sentiment == 'positive'
+        assert phone is None
+
+    def test_net_problem_after_condition_question(self):
+        sentiment, phone = analyze_response(
+            "нет проблем, всё работает",
+            last_ai_message="а состояние какое? есть нюансы?",
+        )
+        assert sentiment == 'positive'
+
+    def test_tsarapin_net_after_condition_question(self):
+        sentiment, phone = analyze_response(
+            "царапин нет",
+            last_ai_message="а есть царапины или сколы?",
+        )
+        assert sentiment == 'positive'
+
+    def test_defektov_net_without_condition_question(self):
+        """Even without condition question context, 'дефектов нет' should NOT be negative."""
+        sentiment, phone = analyze_response(
+            "дефектов нет, всё идеально",
+            last_ai_message="привет, как дела?",
+        )
+        # Should NOT be 'negative' — 'нет' negates 'дефектов'
+        assert sentiment != 'negative'
+
+    def test_real_negative_still_works(self):
+        sentiment, phone = analyze_response(
+            "нет, уже продано",
+            last_ai_message="товар актуален?",
+        )
+        assert sentiment == 'negative'
+
+    def test_short_net_after_condition_question(self):
+        """Existing behavior: short 'нет' after condition question = positive."""
+        sentiment, phone = analyze_response(
+            "нет",
+            last_ai_message="есть дефекты?",
+        )
+        assert sentiment == 'positive'
