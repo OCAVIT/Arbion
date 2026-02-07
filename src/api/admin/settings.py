@@ -48,6 +48,7 @@ async def get_settings(
         matcher_interval_minutes=settings_dict.get("matcher_interval_minutes", 10),
         negotiator_interval_minutes=settings_dict.get("negotiator_interval_minutes", 15),
         seed_queries=settings_dict.get("seed_queries", []),
+        messaging_mode=settings_dict.get("messaging_mode", "personal"),
     )
 
 

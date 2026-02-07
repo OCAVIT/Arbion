@@ -16,6 +16,7 @@ class SettingsResponse(BaseModel):
     matcher_interval_minutes: int = Field(default=10)
     negotiator_interval_minutes: int = Field(default=15)
     seed_queries: List[str] = Field(default_factory=list)
+    messaging_mode: str = Field(default="personal")  # "personal" or "business_account"
 
 
 class SettingsUpdate(BaseModel):
@@ -28,6 +29,7 @@ class SettingsUpdate(BaseModel):
     parser_interval_minutes: Optional[int] = Field(None, ge=1, le=60)
     matcher_interval_minutes: Optional[int] = Field(None, ge=1, le=60)
     negotiator_interval_minutes: Optional[int] = Field(None, ge=1, le=60)
+    messaging_mode: Optional[str] = Field(None, pattern="^(personal|business_account)$")
 
 
 class SettingValue(BaseModel):

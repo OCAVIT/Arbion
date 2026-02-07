@@ -17,6 +17,15 @@
                 </div>
 
                 <div class="form-group">
+                    <label>Режим отправки сообщений</label>
+                    <select id="messagingMode">
+                        <option value="personal">Личный аккаунт менеджера</option>
+                        <option value="business_account">Бизнес-аккаунт (контакты скрыты)</option>
+                    </select>
+                    <small class="form-hint">Личный: менеджер видит контакты и пишет сам. Бизнес-аккаунт: сообщения отправляются через систему, контакты скрыты от менеджера.</small>
+                </div>
+
+                <div class="form-group">
                     <label>Режим назначения сделок</label>
                     <select id="assignmentMode">
                         <option value="free_pool">Свободный пул</option>
@@ -85,6 +94,7 @@ async function loadSettings() {
     const data = await response.json();
 
     document.getElementById('targetChatCount').value = data.target_chat_count;
+    document.getElementById('messagingMode').value = data.messaging_mode;
     document.getElementById('assignmentMode').value = data.assignment_mode;
     document.getElementById('maxDealsPerManager').value = data.max_deals_per_manager;
     document.getElementById('minMarginThreshold').value = data.min_margin_threshold;
@@ -114,6 +124,7 @@ document.getElementById('settingsForm').addEventListener('submit', async (e) => 
 
     const data = {
         target_chat_count: parseInt(document.getElementById('targetChatCount').value),
+        messaging_mode: document.getElementById('messagingMode').value,
         assignment_mode: document.getElementById('assignmentMode').value,
         max_deals_per_manager: parseInt(document.getElementById('maxDealsPerManager').value),
         min_margin_threshold: parseFloat(document.getElementById('minMarginThreshold').value),

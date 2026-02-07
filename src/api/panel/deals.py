@@ -118,6 +118,10 @@ async def list_my_deals(
     can_take = active_count < max_deals
     blocked_reason = None if can_take else "Достигнут лимит активных сделок"
 
+    # Check messaging mode — in business_account mode, hide all contacts from manager
+    messaging_mode_setting = await db.get(SystemSetting, "messaging_mode")
+    messaging_mode = messaging_mode_setting.get_value() if messaging_mode_setting else "personal"
+
     # Build response with masked data
     items = []
     for deal in deals:
@@ -137,9 +141,11 @@ async def list_my_deals(
         # Get seller contact ONLY if:
         # 1. Deal status is HANDED_TO_MANAGER
         # 2. Current user is the assigned manager
+        # 3. Messaging mode is "personal" (business_account hides all contacts)
         seller_contact = None
         if (
-            deal.status == DealStatus.HANDED_TO_MANAGER
+            messaging_mode == "personal"
+            and deal.status == DealStatus.HANDED_TO_MANAGER
             and deal.manager_id == current_user.id
             and deal.sell_order
         ):
