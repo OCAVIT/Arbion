@@ -83,6 +83,19 @@ class OwnerDealResponse(BaseModel):
     negotiation_stage: Optional[str]
     messages_count: int = 0
 
+    # Strategic update fields (Section 6)
+    lead_source: Optional[str] = None
+    niche: Optional[str] = None
+    deal_model: str = "agency"
+    manager_commission_rate: Optional[float] = None
+    buyer_payment_status: str = "pending"
+    seller_payment_status: str = "pending"
+    our_commission_status: str = "pending"
+    payment_method: Optional[str] = None
+    ai_draft_message: Optional[str] = None
+    market_price_context: Optional[str] = None  # JSON string
+    platform: str = "telegram"
+
     model_config = {"from_attributes": True}
 
 
@@ -140,6 +153,13 @@ class ManagerDealResponse(BaseModel):
     # Commission (only for closed WON deals)
     commission: Optional[Decimal] = None
 
+    # Strategic update fields (Section 6)
+    lead_source: Optional[str] = None
+    niche: Optional[str] = None
+    ai_draft_message: Optional[str] = None
+    market_price_context: Optional[str] = None  # Manager sees market context
+    platform: str = "telegram"
+
     model_config = {"from_attributes": True}
 
     @classmethod
@@ -193,6 +213,11 @@ class ManagerDealResponse(BaseModel):
             can_take=can_take,
             take_blocked_reason=take_blocked_reason,
             commission=commission,
+            lead_source=getattr(deal, 'lead_source', None),
+            niche=getattr(deal, 'niche', None),
+            ai_draft_message=getattr(deal, 'ai_draft_message', None),
+            market_price_context=getattr(deal, 'market_price_context', None),
+            platform=getattr(deal, 'platform', 'telegram'),
         )
 
 

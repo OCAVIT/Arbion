@@ -16,6 +16,7 @@ from src.schemas.deal import (
     OwnerDealResponse,
     SendMessageRequest,
 )
+from src.schemas.copilot import LeadCardResponse, SuggestedResponses
 from src.schemas.order import OrderCreate, OrderResponse, OrderUpdate
 from src.schemas.settings import SettingsResponse, SettingsUpdate
 from src.schemas.user import (
@@ -56,6 +57,9 @@ __all__ = [
     "OrderCreate",
     "OrderResponse",
     "OrderUpdate",
+    # Copilot
+    "LeadCardResponse",
+    "SuggestedResponses",
     # Settings
     "SettingsResponse",
     "SettingsUpdate",

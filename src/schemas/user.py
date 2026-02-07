@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -34,6 +34,11 @@ class ManagerResponse(BaseModel):
 
     # Unique invite token for personal login link
     invite_token: Optional[str] = None
+
+    # Strategic update fields (Section 6)
+    niches: Optional[List[str]] = None  # Deserialized from JSON
+    level: str = "junior"
+    telegram_user_id: Optional[int] = None
 
     # Stats
     active_deals_count: int = 0
