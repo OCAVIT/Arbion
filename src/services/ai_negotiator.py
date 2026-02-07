@@ -114,6 +114,21 @@ FOLLOWUP_CITY_OR_SPECS = [
     "а откуда? в каком городе?",
 ]
 
+# Первый ответ покупателю (уточнение предпочтений, НЕ состояние!)
+FOLLOWUP_BUYER_FIRST = [
+    "понял, а какой именно вариант интересует?",
+    "хорошо, а какие предпочтения? что важно?",
+    "ясно, а что-то конкретное ищешь или в целом?",
+    "понял, а по каким параметрам выбираешь?",
+]
+
+# Уточнение характеристик (для продавца)
+FOLLOWUP_SPECS = [
+    "а какие основные характеристики?",
+    "а по параметрам что можешь сказать?",
+    "а подробнее по характеристикам расскажешь?",
+]
+
 # Уточнение если непонятно
 FOLLOWUP_UNCLEAR = [
     "не совсем понял, так продаёшь ещё?",
@@ -430,18 +445,47 @@ def count_exchanges(context: List[dict]) -> int:
     return min(ai_count, other_count)
 
 
+def _pick_missing_field_response(missing: List[str], target: str) -> Tuple[str, Optional[str]]:
+    """Pick a template response for the first missing field."""
+    field = missing[0]
+
+    if target == "seller":
+        if field == "condition":
+            return 'respond', random.choice(FOLLOWUP_CONDITION)
+        elif field == "city":
+            return 'respond', random.choice(MISSING_DATA_TEMPLATES["region"])
+        elif field == "specs":
+            return 'respond', random.choice(FOLLOWUP_SPECS)
+        elif field == "price":
+            return 'respond', random.choice(FOLLOWUP_PRICE)
+    else:  # buyer
+        if field == "preferences":
+            return 'respond', random.choice(FOLLOWUP_BUYER_FIRST)
+        elif field == "city":
+            return 'respond', random.choice(MISSING_DATA_TEMPLATES["region"])
+        elif field == "price":
+            return 'respond', random.choice(FOLLOWUP_BUYER_PRICE)
+
+    return 'respond', random.choice(FOLLOWUP_UNCLEAR)
+
+
 def determine_next_action(
     sentiment: str,
     phone: Optional[str],
     context: List[dict],
     stage: NegotiationStage,
     target: str = "seller",
+    missing_fields: Optional[List[str]] = None,
 ) -> Tuple[str, Optional[str]]:
     """
     Определение следующего действия на основе анализа.
 
+    When missing_fields is provided, uses context-aware logic to ask only
+    about data that's actually missing — prevents duplicate questions.
+
     Args:
         target: 'seller' или 'buyer' — с кем ведём диалог
+        missing_fields: list of still-missing field names (from detect_missing_fields)
 
     Returns:
         Tuple[action, response]:
@@ -458,50 +502,47 @@ def determine_next_action(
     if sentiment == 'negative':
         return 'close', random.choice(GOODBYE_TEMPLATES)
 
-    # Выбираем шаблоны цены в зависимости от target
+    # Контакт упомянут без номера - просим номер
+    if sentiment == 'contact':
+        return 'respond', random.choice(FOLLOWUP_ASK_CONTACT)
+
+    # --- Context-aware path (when missing_fields is provided) ---
+    if missing_fields is not None:
+        if missing_fields:
+            return _pick_missing_field_response(missing_fields, target)
+        # All fields collected → ask for phone
+        return 'respond', random.choice(FOLLOWUP_ASK_CONTACT)
+
+    # --- Legacy path (no missing_fields — backward compat) ---
     price_templates = FOLLOWUP_BUYER_PRICE if target == "buyer" else FOLLOWUP_PRICE
 
-    # Логика в зависимости от количества обменов
     if exchanges == 0:
-        # Первый ответ - уточняем состояние
         if sentiment in ['positive', 'price', 'condition']:
-            if target == "buyer" and sentiment == 'price':
-                return 'respond', random.choice(price_templates)
+            if target == "buyer":
+                if sentiment == 'price':
+                    return 'respond', random.choice(price_templates)
+                return 'respond', random.choice(FOLLOWUP_BUYER_FIRST)
             return 'respond', random.choice(FOLLOWUP_POSITIVE_FIRST)
-        elif sentiment == 'contact':
-            # Упоминают контакт, но номера нет - просим
-            return 'respond', random.choice(FOLLOWUP_ASK_CONTACT)
         else:
             return 'respond', random.choice(FOLLOWUP_UNCLEAR)
 
     elif exchanges == 1:
-        # Второй обмен - обсуждаем цену или состояние
         if sentiment == 'price':
             return 'respond', random.choice(price_templates)
         elif sentiment in ['positive', 'condition']:
+            if target == "buyer":
+                return 'respond', random.choice(FOLLOWUP_BUYER_FIRST)
             return 'respond', random.choice(FOLLOWUP_CONDITION)
-        elif sentiment == 'contact':
-            return 'respond', random.choice(FOLLOWUP_ASK_CONTACT)
         else:
             return 'respond', random.choice(FOLLOWUP_UNCLEAR)
 
     elif exchanges in [2, 3]:
-        # Exchanges 2-3: ask city/specs, NOT phone yet
-        if sentiment == 'contact':
-            return 'respond', random.choice(FOLLOWUP_ASK_CONTACT)
-        elif sentiment in ['positive', 'price', 'condition']:
-            return 'respond', random.choice(FOLLOWUP_CITY_OR_SPECS)
-        else:
-            return 'respond', random.choice(FOLLOWUP_CITY_OR_SPECS)
+        if target == "buyer":
+            return 'respond', random.choice(FOLLOWUP_BUYER_PRICE)
+        return 'respond', random.choice(FOLLOWUP_CITY_OR_SPECS)
 
-    elif exchanges >= 4:
-        # Exchanges 4+: now can ask for phone
-        if sentiment == 'contact':
-            return 'respond', "скинь номер телефона - созвонимся"
-        elif sentiment in ['positive', 'price', 'condition']:
-            return 'respond', random.choice(FOLLOWUP_ASK_CONTACT)
-        else:
-            return 'respond', random.choice(FOLLOWUP_ASK_CONTACT)
+    else:
+        return 'respond', random.choice(FOLLOWUP_ASK_CONTACT)
 
     return 'respond', random.choice(FOLLOWUP_UNCLEAR)
 
@@ -582,6 +623,7 @@ def _extract_condition_from_text(text: str) -> Optional[str]:
         'как новый', 'без дефектов', 'без косяков', 'состояние',
         'царапин', 'потёртост', 'потертост', 'скол', 'трещин',
         'качество', 'износ', 'повреждени', 'целый',
+        'работает', 'дефект', 'исправн', 'рабочи', 'сломан', 'битый',
     ]
     if any(m in text_lower for m in condition_markers):
         return text[:200].strip()
@@ -665,6 +707,52 @@ def collect_known_data(deal, target: str, context: Optional[List[dict]] = None) 
                         break
 
     return known
+
+
+def build_ai_insight(deal) -> str:
+    """Build a structured AI Insight summary from deal data."""
+    parts = []
+
+    # Seller summary
+    seller_parts = []
+    if deal.seller_city:
+        seller_parts.append(deal.seller_city)
+    if deal.seller_condition:
+        seller_parts.append(f"состояние: {deal.seller_condition[:80]}")
+    if deal.seller_specs:
+        seller_parts.append(deal.seller_specs[:80])
+    if deal.sell_price:
+        seller_parts.append(f"цена: {deal.sell_price}")
+    if deal.seller_phone:
+        seller_parts.append(f"тел: {deal.seller_phone}")
+    if seller_parts:
+        parts.append(f"Продавец: {'; '.join(seller_parts)}")
+
+    # Buyer summary
+    buyer_parts = []
+    if deal.region and not deal.seller_city:
+        buyer_parts.append(deal.region)
+    if deal.buyer_preferences:
+        buyer_parts.append(deal.buyer_preferences[:80])
+    if deal.buy_price:
+        buyer_parts.append(f"бюджет: {deal.buy_price}")
+    if deal.buyer_phone:
+        buyer_parts.append(f"тел: {deal.buyer_phone}")
+    if buyer_parts:
+        parts.append(f"Покупатель: {'; '.join(buyer_parts)}")
+
+    # Recommendation
+    if deal.seller_phone and deal.buyer_phone:
+        parts.append("Оба контакта получены — можно связывать стороны")
+    elif deal.seller_phone:
+        parts.append("Контакт продавца получен, ждём контакт покупателя")
+    elif deal.buyer_phone:
+        parts.append("Контакт покупателя получен, ждём контакт продавца")
+
+    if not parts:
+        return f"Переговоры в процессе по {deal.product}"
+
+    return "\n".join(parts)
 
 
 # =====================================================
@@ -918,7 +1006,7 @@ async def process_seller_response(
                     last_ai_msg = msg['content']
                     break
             sentiment, phone = analyze_response(response_text, last_ai_msg)
-            action, response = determine_next_action(sentiment, phone, context, negotiation.stage, target="seller")
+            action, response = determine_next_action(sentiment, phone, context, negotiation.stage, target="seller", missing_fields=seller_missing["missing"])
 
         # Safety net: regex-проверка на телефон в тексте продавца
         regex_phone = extract_phone_from_text(response_text)
@@ -930,7 +1018,7 @@ async def process_seller_response(
 
         if action == 'warm':
             deal.status = DealStatus.WARM
-            deal.ai_insight = f"Продавец заинтересован. Получен контакт: {phone or 'упомянут'}. Последнее сообщение: {response_text[:100]}"
+            deal.ai_insight = build_ai_insight(deal)
             negotiation.stage = NegotiationStage.WARM
             if phone:
                 deal.seller_phone = phone
@@ -986,8 +1074,7 @@ async def process_seller_response(
             elif negotiation.stage == NegotiationStage.CONTACTED:
                 negotiation.stage = NegotiationStage.NEGOTIATING
 
-            exchanges = count_exchanges(context)
-            deal.ai_insight = f"В диалоге. Обменов: {exchanges + 1}. Последний ответ: {response_text[:50]}"
+            deal.ai_insight = build_ai_insight(deal)
 
             await db.flush()
             logger.info(f">>> Переговоры {negotiation.id}: follow-up: '{response}'")
@@ -1101,7 +1188,7 @@ async def process_buyer_response(
                     last_ai_msg = msg['content']
                     break
             sentiment, phone = analyze_response(response_text, last_ai_msg)
-            action, response = determine_next_action(sentiment, phone, context, negotiation.stage, target="buyer")
+            action, response = determine_next_action(sentiment, phone, context, negotiation.stage, target="buyer", missing_fields=buyer_missing["missing"])
 
         # Safety net: regex-проверка на телефон
         regex_phone = extract_phone_from_text(response_text)
@@ -1112,14 +1199,14 @@ async def process_buyer_response(
         logger.info(f"Переговоры {negotiation.id} (покупатель): action={action}, response='{(response or '')[:30]}...', phone={phone}")
 
         if action == 'warm' and phone:
-            deal.ai_insight = (deal.ai_insight or "") + f"\nПокупатель дал контакт: {phone}"
+            deal.ai_insight = build_ai_insight(deal)
             deal.buyer_phone = phone
             await db.flush()
             logger.info(f">>> Сделка {deal.id}: покупатель дал номер!")
             return True
 
         elif action == 'close':
-            deal.ai_insight = (deal.ai_insight or "") + f"\nПокупатель отказался: {response_text[:50]}"
+            deal.ai_insight = build_ai_insight(deal)
 
             if response:
                 goodbye_msg = NegotiationMessage(
@@ -1159,13 +1246,13 @@ async def process_buyer_response(
             )
             db.add(outbox)
 
-            deal.ai_insight = (deal.ai_insight or "") + f"\nПокупатель: {response_text[:30]}"
+            deal.ai_insight = build_ai_insight(deal)
 
             await db.flush()
             logger.info(f">>> Переговоры {negotiation.id}: follow-up покупателю: '{response}'")
             return True
 
-        deal.ai_insight = (deal.ai_insight or "") + f"\nПокупатель: {response_text[:50]}"
+        deal.ai_insight = build_ai_insight(deal)
         await db.flush()
         return True
 
