@@ -1,0 +1,658 @@
+{% extends "panel/base.html" %}
+
+{% block page_title %}Карточка лида{% endblock %}
+
+{% block header_actions %}
+<a href="/panel" class="btn btn-sm btn-outline">← Назад</a>
+{% endblock %}
+
+{% block content %}
+<div id="leadCard">
+    <div class="loading">Загрузка...</div>
+</div>
+
+<!-- Skip Modal -->
+<div class="modal" id="skipModal" style="display:none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Пропустить лид</h3>
+            <button class="modal-close" onclick="closeSkipModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p style="color:var(--text-secondary);margin-bottom:16px;">Укажите причину пропуска:</p>
+            <div class="skip-reasons">
+                <label class="skip-reason-option">
+                    <input type="radio" name="skip_reason" value="low_margin"> Низкая маржа
+                </label>
+                <label class="skip-reason-option">
+                    <input type="radio" name="skip_reason" value="bad_product"> Неподходящий товар
+                </label>
+                <label class="skip-reason-option">
+                    <input type="radio" name="skip_reason" value="no_contact"> Нет контакта
+                </label>
+                <label class="skip-reason-option">
+                    <input type="radio" name="skip_reason" value="other" checked> Другое
+                </label>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-outline" onclick="closeSkipModal()">Отмена</button>
+            <button class="btn btn-danger" onclick="confirmSkip()">Пропустить</button>
+        </div>
+    </div>
+</div>
+
+<style>
+/* Lead Card Layout */
+.lead-card-container {
+    max-width: 720px;
+}
+
+/* Lead Header */
+.lead-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 24px;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.lead-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.lead-title h2 {
+    font-size: 22px;
+    font-weight: 700;
+}
+
+.lead-niche-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    background-color: var(--accent-soft);
+    color: #818cf8;
+    border: 1px solid var(--accent);
+}
+
+.lead-platform-badge {
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 500;
+    background-color: var(--bg-hover);
+    color: var(--text-secondary);
+}
+
+.lead-date {
+    color: var(--text-muted);
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+/* Market Context Card */
+.market-context-card {
+    background: linear-gradient(135deg, var(--bg-card) 0%, rgba(99, 102, 241, 0.08) 100%);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-lg);
+    padding: 20px 24px;
+    margin-bottom: 20px;
+}
+
+.market-context-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.market-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 16px;
+}
+
+.market-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.market-stat-label {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.market-stat-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.market-stat-value.highlight {
+    color: var(--success);
+}
+
+/* Deal Sides */
+.deal-sides {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.deal-side-card {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-lg);
+    padding: 18px 20px;
+}
+
+.deal-side-card.seller {
+    border-left: 3px solid #3b82f6;
+}
+
+.deal-side-card.buyer {
+    border-left: 3px solid #8b5cf6;
+}
+
+.deal-side-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 8px;
+}
+
+.deal-side-price {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--success);
+    margin-bottom: 4px;
+}
+
+.deal-side-details {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+/* Margin Card */
+.margin-card {
+    background: linear-gradient(135deg, var(--bg-card) 0%, var(--success-soft) 100%);
+    border: 1px solid var(--success);
+    border-radius: var(--border-radius-lg);
+    padding: 20px 24px;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.margin-label {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.margin-value {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--success);
+}
+
+.margin-sub {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+}
+
+/* AI Draft Card */
+.draft-card {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-lg);
+    margin-bottom: 20px;
+    overflow: hidden;
+}
+
+.draft-card-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.draft-card-header h3 {
+    font-size: 15px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.draft-target-tabs {
+    display: flex;
+    gap: 4px;
+    background: var(--bg-secondary);
+    padding: 3px;
+    border-radius: var(--border-radius);
+}
+
+.draft-target-tab {
+    padding: 6px 14px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: calc(var(--border-radius) - 2px);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.draft-target-tab:hover {
+    color: var(--text-primary);
+}
+
+.draft-target-tab.active {
+    background: var(--success);
+    color: white;
+}
+
+.draft-card-body {
+    padding: 20px;
+}
+
+.draft-textarea {
+    width: 100%;
+    min-height: 100px;
+    resize: vertical;
+    font-size: 14px;
+    line-height: 1.6;
+    font-family: inherit;
+}
+
+.draft-hint {
+    display: block;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+/* Action Buttons */
+.lead-actions {
+    display: flex;
+    gap: 12px;
+}
+
+.lead-actions .btn {
+    flex: 1;
+    padding: 14px 20px;
+    font-size: 15px;
+}
+
+/* Skip Reason Options */
+.skip-reasons {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.skip-reason-option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background-color: var(--bg-secondary);
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    transition: background-color 0.2s;
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
+.skip-reason-option:hover {
+    background-color: var(--bg-hover);
+}
+
+.skip-reason-option input[type="radio"] {
+    width: auto;
+    accent-color: var(--success);
+}
+
+/* No market context */
+.no-market-context {
+    color: var(--text-muted);
+    font-size: 13px;
+    font-style: italic;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .lead-header {
+        flex-direction: column;
+    }
+
+    .deal-sides {
+        grid-template-columns: 1fr;
+    }
+
+    .market-stats {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .lead-actions {
+        flex-direction: column;
+    }
+
+    .lead-actions .btn {
+        width: 100%;
+    }
+
+    .draft-card-header {
+        flex-direction: column;
+        gap: 10px;
+        align-items: flex-start;
+    }
+
+    .margin-value {
+        font-size: 24px;
+    }
+
+    .deal-side-price {
+        font-size: 18px;
+    }
+}
+
+@media (max-width: 480px) {
+    .market-stats {
+        grid-template-columns: 1fr;
+    }
+
+    .lead-title h2 {
+        font-size: 18px;
+    }
+}
+</style>
+
+<script>
+const dealId = {{ deal_id }};
+let leadData = null;
+let draftTarget = 'seller';
+
+document.addEventListener('DOMContentLoaded', loadLeadCard);
+
+async function loadLeadCard() {
+    try {
+        const response = await fetch(`/panel/leads/${dealId}/card`);
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || 'Не удалось загрузить карточку');
+        }
+        leadData = await response.json();
+        renderLeadCard(leadData);
+    } catch (error) {
+        document.getElementById('leadCard').innerHTML =
+            `<div class="empty">${escapeHtml(error.message)}</div>`;
+    }
+}
+
+function renderLeadCard(data) {
+    const nicheLabels = {
+        'construction': 'Стройматериалы',
+        'agriculture': 'Агро',
+        'fmcg': 'FMCG',
+        'other': 'Другое'
+    };
+
+    const nicheLabel = data.niche ? nicheLabels[data.niche] || data.niche : null;
+    const createdAt = new Date(data.created_at);
+    const dateStr = createdAt.toLocaleDateString('ru-RU', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+    });
+
+    let html = `<div class="lead-card-container">`;
+
+    // Header
+    html += `
+        <div class="lead-header">
+            <div class="lead-title">
+                <h2>${escapeHtml(data.product)}</h2>
+                ${nicheLabel ? `<span class="lead-niche-badge">${escapeHtml(nicheLabel)}</span>` : ''}
+                <span class="lead-platform-badge">${escapeHtml(data.platform)}</span>
+            </div>
+            <span class="lead-date">${dateStr}</span>
+        </div>
+    `;
+
+    // Market Context
+    const ctx = data.market_context;
+    if (ctx && ctx.avg_price) {
+        html += `
+            <div class="market-context-card">
+                <div class="market-context-title">Рыночный контекст</div>
+                <div class="market-stats">
+                    <div class="market-stat">
+                        <span class="market-stat-label">Средняя цена</span>
+                        <span class="market-stat-value">${formatMoney(ctx.avg_price)}</span>
+                    </div>
+                    <div class="market-stat">
+                        <span class="market-stat-label">Минимум</span>
+                        <span class="market-stat-value">${formatMoney(ctx.min_seen)}</span>
+                    </div>
+                    <div class="market-stat">
+                        <span class="market-stat-label">Максимум</span>
+                        <span class="market-stat-value">${formatMoney(ctx.max_seen)}</span>
+                    </div>
+                    <div class="market-stat">
+                        <span class="market-stat-label">Источников</span>
+                        <span class="market-stat-value">${ctx.sources_count || 0}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    } else {
+        html += `
+            <div class="market-context-card">
+                <div class="market-context-title">Рыночный контекст</div>
+                <p class="no-market-context">Данных о рыночных ценах пока нет</p>
+            </div>
+        `;
+    }
+
+    // Deal Sides: Seller & Buyer
+    html += `<div class="deal-sides">`;
+
+    // Seller side
+    html += `
+        <div class="deal-side-card seller">
+            <div class="deal-side-label">Продавец</div>
+            <div class="deal-side-price">${formatMoney(data.sell_price)}</div>
+            <div class="deal-side-details">
+                ${data.volume ? escapeHtml(data.volume) + '<br>' : ''}
+                ${data.seller_city ? escapeHtml(data.seller_city) : ''}
+                ${data.region && data.region !== data.seller_city ? (data.seller_city ? ', ' : '') + escapeHtml(data.region) : ''}
+                ${!data.volume && !data.seller_city && !data.region ? '<span class="text-muted">Нет деталей</span>' : ''}
+            </div>
+        </div>
+    `;
+
+    // Buyer side (price hidden - only margin %)
+    html += `
+        <div class="deal-side-card buyer">
+            <div class="deal-side-label">Покупатель</div>
+            <div class="deal-side-price">${data.estimated_margin > 0 ? '+' + data.estimated_margin + '%' : 'Нет данных'}</div>
+            <div class="deal-side-details">
+                ${data.estimated_margin > 0 ? 'Ожидаемая маржа' : 'Маржа не определена'}
+                ${data.region ? '<br>' + escapeHtml(data.region) : ''}
+            </div>
+        </div>
+    `;
+
+    html += `</div>`;
+
+    // Margin Card
+    if (data.estimated_margin > 0) {
+        html += `
+            <div class="margin-card">
+                <div class="margin-label">Ожидаемая маржа</div>
+                <div class="margin-value">${data.estimated_margin}%</div>
+                <div class="margin-sub">от цены продажи</div>
+            </div>
+        `;
+    }
+
+    // AI Draft
+    const draftText = data.ai_draft_message || '';
+    html += `
+        <div class="draft-card">
+            <div class="draft-card-header">
+                <h3>AI-драфт сообщения</h3>
+                <div class="draft-target-tabs">
+                    <button class="draft-target-tab active" onclick="switchDraftTarget('seller')">Продавцу</button>
+                    <button class="draft-target-tab" onclick="switchDraftTarget('buyer')">Покупателю</button>
+                </div>
+            </div>
+            <div class="draft-card-body">
+                <textarea id="draftMessage" class="draft-textarea" placeholder="Напишите сообщение...">${escapeHtml(draftText)}</textarea>
+                <span class="draft-hint">Отредактируйте текст перед отправкой или отправьте как есть</span>
+            </div>
+        </div>
+    `;
+
+    // Actions
+    html += `
+        <div class="lead-actions">
+            <button onclick="sendDraft()" class="btn btn-success" id="sendDraftBtn">Отправить</button>
+            <button onclick="openSkipModal()" class="btn btn-outline">Пропустить</button>
+        </div>
+    `;
+
+    html += `</div>`;
+
+    document.getElementById('leadCard').innerHTML = html;
+}
+
+function switchDraftTarget(target) {
+    draftTarget = target;
+    document.querySelectorAll('.draft-target-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.textContent.includes(target === 'seller' ? 'Продавцу' : 'Покупателю'));
+    });
+}
+
+async function sendDraft() {
+    const message = document.getElementById('draftMessage').value.trim();
+    if (!message) {
+        showNotification('Введите текст сообщения', 'error');
+        return;
+    }
+
+    const btn = document.getElementById('sendDraftBtn');
+    btn.disabled = true;
+    btn.textContent = 'Отправка...';
+
+    try {
+        const response = await fetch(`/panel/leads/${dealId}/send-draft`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message, target: draftTarget })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            showNotification('Сообщение отправлено!', 'success');
+            setTimeout(() => { window.location.href = '/panel'; }, 1500);
+        } else {
+            showNotification(data.detail || 'Ошибка отправки', 'error');
+        }
+    } catch (error) {
+        showNotification('Ошибка сети', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Отправить';
+    }
+}
+
+function openSkipModal() {
+    document.getElementById('skipModal').style.display = 'flex';
+}
+
+function closeSkipModal() {
+    document.getElementById('skipModal').style.display = 'none';
+}
+
+async function confirmSkip() {
+    const reason = document.querySelector('input[name="skip_reason"]:checked')?.value || 'other';
+
+    try {
+        const response = await fetch(`/panel/leads/${dealId}/skip`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            showNotification('Лид пропущен', 'info');
+            closeSkipModal();
+            setTimeout(() => { window.location.href = '/panel'; }, 1000);
+        } else {
+            showNotification(data.detail || 'Ошибка', 'error');
+        }
+    } catch (error) {
+        showNotification('Ошибка сети', 'error');
+    }
+}
+
+function formatMoney(value) {
+    return new Intl.NumberFormat('ru-RU', {
+        style: 'currency',
+        currency: 'RUB',
+        maximumFractionDigits: 0
+    }).format(value);
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Notification system
+function showNotification(message, type = 'info') {
+    const existing = document.querySelector('.notification');
+    if (existing) existing.remove();
+
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.innerHTML = `
+        <span>${message}</span>
+        <button onclick="this.parentElement.remove()" class="notification-close">&times;</button>
+    `;
+    document.body.appendChild(notification);
+
+    setTimeout(() => notification.remove(), 5000);
+}
+
+// Close modal on overlay click
+document.getElementById('skipModal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeSkipModal();
+});
+
+// Close modal on escape
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeSkipModal();
+});
+</script>
+{% endblock %}

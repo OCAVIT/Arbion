@@ -83,7 +83,7 @@ async def get_panel_stats(
             .where(
                 and_(
                     DetectedDeal.manager_id.is_(None),
-                    DetectedDeal.status == DealStatus.WARM,
+                    DetectedDeal.status.in_([DealStatus.WARM, DealStatus.COLD]),
                 )
             )
         )
@@ -120,13 +120,13 @@ async def get_warm_pool(
     if assignment_mode != "free_pool":
         return {"items": [], "message": "Auto-assignment mode is active"}
 
-    # Get unassigned warm deals
+    # Get unassigned warm and cold deals (cold = copilot mode new leads)
     result = await db.execute(
         select(DetectedDeal)
         .where(
             and_(
                 DetectedDeal.manager_id.is_(None),
-                DetectedDeal.status == DealStatus.WARM,
+                DetectedDeal.status.in_([DealStatus.WARM, DealStatus.COLD]),
             )
         )
         .order_by(DetectedDeal.created_at.desc())

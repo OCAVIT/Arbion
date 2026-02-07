@@ -34,13 +34,13 @@
     <span class="help-item" title="Нажмите 'Взять в работу', чтобы начать работу со сделкой">✅ Как взять сделку</span>
 </div>
 
-<!-- Warm Leads Pool -->
+<!-- Leads Pool -->
 <div class="card" id="poolSection">
     <div class="card-header">
-        <h3>Тёплые лиды в пуле</h3>
+        <h3>Лиды в пуле</h3>
     </div>
     <div class="card-body">
-        <p class="card-description">Это сделки, где AI уже провёл переговоры с продавцом. Продавец заинтересован — осталось только закрыть сделку!</p>
+        <p class="card-description">Новые лиды от AI и тёплые сделки, готовые к работе</p>
         <div class="deals-grid" id="poolDeals">
             <div class="loading">Загрузка...</div>
         </div>
@@ -96,17 +96,20 @@ async function loadPool() {
     }
 
     container.innerHTML = data.items.map(deal => `
-        <div class="deal-card deal-card-warm">
+        <div class="deal-card ${deal.status === 'cold' ? '' : 'deal-card-warm'}">
             <div class="deal-header">
                 <span class="deal-product">${escapeHtml(deal.product)}</span>
-                <span class="badge badge-warm">Тёплая</span>
+                <span class="badge badge-${deal.status}">${getStatusLabel(deal.status)}</span>
             </div>
             <div class="deal-price">${formatMoney(deal.sell_price)}</div>
             <div class="deal-region">${deal.region || 'Регион не указан'}</div>
+            ${deal.ai_draft_message ? '<div class="deal-meta" style="color:var(--text-secondary)">AI-драфт готов</div>' : ''}
             <div class="deal-actions">
-                ${deal.can_take ?
-                    `<button onclick="takeDeal(${deal.id})" class="btn btn-primary btn-sm">Взять в работу</button>` :
-                    `<button class="btn btn-sm" disabled title="${deal.take_blocked_reason}">Недоступно</button>`
+                ${deal.status === 'cold' ?
+                    `<a href="/panel/leads/${deal.id}" class="btn btn-primary btn-sm">Посмотреть</a>` :
+                    deal.can_take ?
+                        `<button onclick="takeDeal(${deal.id})" class="btn btn-success btn-sm">Взять в работу</button>` :
+                        `<button class="btn btn-sm" disabled title="${deal.take_blocked_reason}">Недоступно</button>`
                 }
             </div>
         </div>

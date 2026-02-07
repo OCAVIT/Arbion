@@ -57,11 +57,13 @@ async function loadDeals() {
                 <span>Сообщений: ${deal.messages_count}</span>
             </div>
             <div class="deal-actions">
-                ${deal.can_take && deal.status === 'warm' ?
-                    `<button onclick="takeDeal(${deal.id})" class="btn btn-success btn-sm">Взять в работу</button>` :
-                    deal.negotiation_id ?
-                        `<a href="/panel/chat/${deal.negotiation_id}" class="btn btn-primary btn-sm">Открыть чат</a>` :
-                        '<span class="text-muted">Нет переписки</span>'
+                ${deal.status === 'cold' && deal.can_take ?
+                    `<a href="/panel/leads/${deal.id}" class="btn btn-primary btn-sm">Посмотреть</a>` :
+                    deal.can_take && deal.status === 'warm' ?
+                        `<button onclick="takeDeal(${deal.id})" class="btn btn-success btn-sm">Взять в работу</button>` :
+                        deal.negotiation_id ?
+                            `<a href="/panel/chat/${deal.negotiation_id}" class="btn btn-primary btn-sm">Открыть чат</a>` :
+                            '<span class="text-muted">Нет переписки</span>'
                 }
             </div>
         </div>

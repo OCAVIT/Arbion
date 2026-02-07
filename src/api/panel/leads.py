@@ -13,6 +13,8 @@ from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +39,7 @@ from src.services.commission import calculate_commission_rate
 from src.utils.audit import get_client_ip, log_action
 
 router = APIRouter(prefix="/leads")
+templates = Jinja2Templates(directory="src/templates")
 
 
 # ── Request schemas ──────────────────────────────────────
@@ -72,7 +75,23 @@ class CreateLeadRequest(BaseModel):
     notes: Optional[str] = Field(None, max_length=2000)
 
 
-# ── Endpoints ────────────────────────────────────────────
+# ── Page routes ──────────────────────────────────────────
+
+
+@router.get("/{deal_id}", response_class=HTMLResponse, include_in_schema=False)
+async def lead_card_page(
+    request: Request,
+    deal_id: int,
+    current_user: User = Depends(require_manager),
+):
+    """Render lead card page for manager."""
+    return templates.TemplateResponse(
+        "panel/lead_card.html",
+        {"request": request, "user": current_user, "deal_id": deal_id},
+    )
+
+
+# ── API Endpoints ────────────────────────────────────────
 
 
 @router.get("/{deal_id}/card", response_model=LeadCardResponse)
