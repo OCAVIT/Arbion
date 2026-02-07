@@ -144,6 +144,21 @@ async def get_lead_card(
     if deal.sell_order and deal.sell_order.quantity:
         volume = deal.sell_order.quantity
 
+    # Parse ai_draft_message JSON into separate seller/buyer drafts
+    ai_draft_seller = None
+    ai_draft_buyer = None
+    if deal.ai_draft_message:
+        try:
+            drafts = json.loads(deal.ai_draft_message)
+            if isinstance(drafts, dict):
+                ai_draft_seller = drafts.get("seller")
+                ai_draft_buyer = drafts.get("buyer")
+            else:
+                # Plain string fallback (old format) — treat as seller draft
+                ai_draft_seller = deal.ai_draft_message
+        except (json.JSONDecodeError, TypeError):
+            ai_draft_seller = deal.ai_draft_message
+
     return LeadCardResponse(
         deal_id=deal.id,
         product=deal.product,
@@ -153,7 +168,8 @@ async def get_lead_card(
         volume=volume,
         region=deal.region,
         seller_city=deal.seller_city,
-        ai_draft_message=deal.ai_draft_message,
+        ai_draft_seller=ai_draft_seller,
+        ai_draft_buyer=ai_draft_buyer,
         market_context=market_context,
         created_at=deal.created_at,
         platform=deal.platform,

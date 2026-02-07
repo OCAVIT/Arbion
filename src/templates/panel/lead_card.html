@@ -510,8 +510,9 @@ function renderLeadCard(data) {
         `;
     }
 
-    // AI Draft
-    const draftText = data.ai_draft_message || '';
+    // AI Draft — separate seller/buyer drafts
+    const sellerDraft = data.ai_draft_seller || '';
+    const buyerDraft = data.ai_draft_buyer || '';
     html += `
         <div class="draft-card">
             <div class="draft-card-header">
@@ -522,7 +523,7 @@ function renderLeadCard(data) {
                 </div>
             </div>
             <div class="draft-card-body">
-                <textarea id="draftMessage" class="draft-textarea" placeholder="Напишите сообщение...">${escapeHtml(draftText)}</textarea>
+                <textarea id="draftMessage" class="draft-textarea" placeholder="Напишите сообщение...">${escapeHtml(sellerDraft)}</textarea>
                 <span class="draft-hint">Отредактируйте текст перед отправкой или отправьте как есть</span>
             </div>
         </div>
@@ -546,6 +547,13 @@ function switchDraftTarget(target) {
     document.querySelectorAll('.draft-target-tab').forEach(tab => {
         tab.classList.toggle('active', tab.textContent.includes(target === 'seller' ? 'Продавцу' : 'Покупателю'));
     });
+    // Swap textarea content to the selected target's draft
+    const textarea = document.getElementById('draftMessage');
+    if (textarea && leadData) {
+        textarea.value = target === 'seller'
+            ? (leadData.ai_draft_seller || '')
+            : (leadData.ai_draft_buyer || '');
+    }
 }
 
 async function sendDraft() {

@@ -17,7 +17,8 @@ class LeadCardResponse(BaseModel):
     volume: Optional[str] = None
     region: Optional[str] = None
     seller_city: Optional[str] = None
-    ai_draft_message: Optional[str] = None
+    ai_draft_seller: Optional[str] = None
+    ai_draft_buyer: Optional[str] = None
     market_context: Optional[Dict] = None  # Parsed JSON
     created_at: datetime
     platform: str = "telegram"
