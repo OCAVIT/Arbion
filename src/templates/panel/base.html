@@ -105,8 +105,10 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
-// Announcement unread badge (persist across page navigations via localStorage)
-let _lastUnreadCount = parseInt(localStorage.getItem('arbion_unread_ann') || '0', 10);
+// Announcement unread badge
+// -1 = first check (page load), show badge silently without sound
+// >=0 = subsequent polls, play sound if count increased
+let _lastUnreadCount = -1;
 async function checkUnreadAnnouncements() {
     try {
         const resp = await fetch('/panel/announcements/unread-count');
@@ -117,13 +119,14 @@ async function checkUnreadAnnouncements() {
         if (data.unread_count > 0) {
             badge.textContent = data.unread_count;
             badge.style.display = 'inline-flex';
-            // Play sound & animate only when count ACTUALLY increased
-            if (data.unread_count > _lastUnreadCount) {
+            // Sound + pulse only on polling (not first page load) when count grew
+            if (_lastUnreadCount >= 0 && data.unread_count > _lastUnreadCount) {
                 badge.classList.remove('nav-badge-pulse');
                 void badge.offsetWidth;
                 badge.classList.add('nav-badge-pulse');
                 try {
                     const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    if (ctx.state === 'suspended') await ctx.resume();
                     const osc = ctx.createOscillator();
                     const gain = ctx.createGain();
                     osc.connect(gain);
@@ -142,11 +145,10 @@ async function checkUnreadAnnouncements() {
             badge.textContent = '';
             _lastUnreadCount = 0;
         }
-        localStorage.setItem('arbion_unread_ann', String(_lastUnreadCount));
     } catch(e) {}
 }
-// Initial check + poll every 30s
+// Initial check + poll every 15s
 checkUnreadAnnouncements();
-setInterval(checkUnreadAnnouncements, 30000);
+setInterval(checkUnreadAnnouncements, 15000);
 </script>
 {% endblock %}
