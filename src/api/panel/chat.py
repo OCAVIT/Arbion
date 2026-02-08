@@ -7,6 +7,7 @@ from typing import Optional
 import io
 import logging
 import os
+import re
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
@@ -15,7 +16,7 @@ from fastapi.templating import Jinja2Templates
 
 logger = logging.getLogger(__name__)
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import and_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -204,6 +205,9 @@ async def get_messages(
         "ai_insight": deal.ai_insight,
     }
 
+    # Check for phone exchange → auto-WARM
+    await _check_phone_exchange(negotiation_id, deal, db)
+
     # If no target filter, return separated lists
     if not target:
         seller_messages = [m for m in all_messages if m.target == "seller"]
@@ -322,6 +326,9 @@ async def send_message(
 
     await db.commit()
     await db.refresh(message)
+
+    # Check for phone exchange → auto-WARM
+    await _check_phone_exchange(negotiation_id, negotiation.deal, db)
 
     return {
         "success": True,
@@ -461,6 +468,103 @@ async def close_deal(
         "success": True,
         "message": "Сделка закрыта" if data.status == "won" else "Сделка отменена",
     }
+
+
+@router.post("/{negotiation_id}/mark-read")
+async def mark_messages_read(
+    negotiation_id: int,
+    target: str = Query(..., pattern="^(seller|buyer)$"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_manager),
+):
+    """Mark all unread messages in a chat tab as read."""
+    result = await db.execute(
+        select(Negotiation)
+        .options(selectinload(Negotiation.deal))
+        .where(Negotiation.id == negotiation_id)
+    )
+    negotiation = result.scalar_one_or_none()
+
+    if not negotiation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Переговоры не найдены",
+        )
+
+    if negotiation.deal.manager_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="У вас нет доступа к этой сделке",
+        )
+
+    target_enum = MessageTarget.SELLER if target == "seller" else MessageTarget.BUYER
+    now = datetime.now(timezone.utc)
+
+    await db.execute(
+        update(NegotiationMessage)
+        .where(
+            and_(
+                NegotiationMessage.negotiation_id == negotiation_id,
+                NegotiationMessage.target == target_enum,
+                NegotiationMessage.role != MessageRole.MANAGER,
+                NegotiationMessage.read_at.is_(None),
+            )
+        )
+        .values(read_at=now)
+    )
+
+    await db.commit()
+    return {"success": True}
+
+
+# Phone detection for auto-WARM status
+_PHONE_RE = re.compile(
+    r'\+?[78]\s*\(?\d{3}\)?\s*[\-\s]?\d{3}[\-\s]?\d{2}[\-\s]?\d{2}'
+    r'|\+7\d{10}'
+    r'|8\d{10}'
+)
+
+
+async def _check_phone_exchange(
+    negotiation_id: int,
+    deal: "DetectedDeal",
+    db: AsyncSession,
+) -> None:
+    """
+    Check if both seller and buyer chats contain phone numbers.
+    If yes and deal is COLD/HANDED_TO_MANAGER, update status to WARM.
+    """
+    if deal.status not in (DealStatus.COLD, DealStatus.HANDED_TO_MANAGER):
+        return
+
+    # Get all messages for this negotiation
+    msg_result = await db.execute(
+        select(NegotiationMessage.target, NegotiationMessage.content)
+        .where(NegotiationMessage.negotiation_id == negotiation_id)
+    )
+    messages = msg_result.all()
+
+    seller_has_phone = False
+    buyer_has_phone = False
+
+    for target, content in messages:
+        if not content:
+            continue
+        if _PHONE_RE.search(content):
+            if target == MessageTarget.SELLER:
+                seller_has_phone = True
+            elif target == MessageTarget.BUYER:
+                buyer_has_phone = True
+
+        if seller_has_phone and buyer_has_phone:
+            break
+
+    if seller_has_phone and buyer_has_phone:
+        deal.status = DealStatus.WARM
+        await db.commit()
+        logger.info(
+            f"Deal #{deal.id} auto-upgraded to WARM (phone exchange detected)"
+        )
 
 
 @router.get("/{negotiation_id}/suggestions", response_model=SuggestedResponses)

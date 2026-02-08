@@ -20,13 +20,15 @@
 
         <nav class="sidebar-nav">
             <div class="nav-section">Рабочее место</div>
-            <a href="/panel" class="nav-item {% if request.url.path == '/panel' or request.url.path == '/panel/dashboard' %}active{% endif %}">
+            <a href="/panel" class="nav-item {% if request.url.path == '/panel' or request.url.path == '/panel/dashboard' %}active{% endif %}" id="navDashboard">
                 <span class="nav-icon">🏠</span>
                 <span>Главная</span>
+                <span class="nav-badge nav-badge-leads" id="leadsBadge" style="display:none;"></span>
             </a>
-            <a href="/panel/deals" class="nav-item {% if '/deals' in request.url.path %}active{% endif %}">
+            <a href="/panel/deals" class="nav-item {% if '/deals' in request.url.path %}active{% endif %}" id="navDeals">
                 <span class="nav-icon">💼</span>
                 <span>Мои сделки</span>
+                <span class="nav-badge nav-badge-messages" id="dealsBadge" style="display:none;"></span>
             </a>
             <a href="/panel/announcements" class="nav-item {% if '/announcements' in request.url.path %}active{% endif %}" id="navAnnouncements">
                 <span class="nav-icon">📢</span>
@@ -105,50 +107,193 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
-// Announcement unread badge
-// -1 = first check (page load), show badge silently without sound
-// >=0 = subsequent polls, play sound if count increased
-let _lastUnreadCount = -1;
+// ═══════════════════════════════════════════════════════
+// UNIFIED NOTIFICATION SYSTEM
+// ═══════════════════════════════════════════════════════
+
+// Toast notification (shared across all panel pages)
+function showNotification(message, type = 'info') {
+    const existing = document.querySelector('.notification');
+    if (existing) existing.remove();
+
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.innerHTML = `
+        <span>${message}</span>
+        <button onclick="this.parentElement.remove()" class="notification-close">&times;</button>
+    `;
+    document.body.appendChild(notification);
+    setTimeout(() => notification.remove(), 5000);
+}
+
+// ── Shared AudioContext ──────────────────────────────
+
+let _audioCtx = null;
+function _getAudioCtx() {
+    if (!_audioCtx) {
+        _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return _audioCtx;
+}
+
+// Announcement sound: 880Hz sine, 300ms
+async function playAnnouncementSound() {
+    try {
+        const ctx = _getAudioCtx();
+        if (ctx.state === 'suspended') await ctx.resume();
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 880;
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+        osc.start(now);
+        osc.stop(now + 0.3);
+    } catch(e) {}
+}
+
+// Message sound: two-tone C5+E5 (523Hz, 659Hz)
+async function playMessageSound() {
+    try {
+        const ctx = _getAudioCtx();
+        if (ctx.state === 'suspended') await ctx.resume();
+        const now = ctx.currentTime;
+        const osc1 = ctx.createOscillator();
+        const gain1 = ctx.createGain();
+        osc1.connect(gain1); gain1.connect(ctx.destination);
+        osc1.frequency.value = 523; osc1.type = 'sine';
+        gain1.gain.setValueAtTime(0.12, now);
+        gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+        osc1.start(now); osc1.stop(now + 0.15);
+
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.connect(gain2); gain2.connect(ctx.destination);
+        osc2.frequency.value = 659; osc2.type = 'sine';
+        gain2.gain.setValueAtTime(0.12, now + 0.17);
+        gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+        osc2.start(now + 0.17); osc2.stop(now + 0.32);
+    } catch(e) {}
+}
+
+// Lead sound: ascending D5+G5 (587Hz, 784Hz), triangle wave
+async function playLeadSound() {
+    try {
+        const ctx = _getAudioCtx();
+        if (ctx.state === 'suspended') await ctx.resume();
+        const now = ctx.currentTime;
+        const osc1 = ctx.createOscillator();
+        const gain1 = ctx.createGain();
+        osc1.connect(gain1); gain1.connect(ctx.destination);
+        osc1.frequency.value = 587; osc1.type = 'triangle';
+        gain1.gain.setValueAtTime(0.15, now);
+        gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+        osc1.start(now); osc1.stop(now + 0.2);
+
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.connect(gain2); gain2.connect(ctx.destination);
+        osc2.frequency.value = 784; osc2.type = 'triangle';
+        gain2.gain.setValueAtTime(0.15, now + 0.22);
+        gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+        osc2.start(now + 0.22); osc2.stop(now + 0.45);
+    } catch(e) {}
+}
+
+// ── Badge helper ──────────────────────────────────
+
+function _updateBadge(el, count, playPulse) {
+    if (!el) return;
+    if (count > 0) {
+        el.textContent = count;
+        el.style.display = 'inline-flex';
+        if (playPulse) {
+            el.classList.remove('nav-badge-pulse');
+            void el.offsetWidth;
+            el.classList.add('nav-badge-pulse');
+        }
+    } else {
+        el.style.display = 'none';
+        el.textContent = '';
+    }
+}
+
+// ── Announcement polling (existing, refactored) ────
+
+let _lastAnnouncementCount = -1;
 async function checkUnreadAnnouncements() {
     try {
         const resp = await fetch('/panel/announcements/unread-count');
         if (!resp.ok) return;
         const data = await resp.json();
         const badge = document.getElementById('announcementBadge');
-        if (!badge) return;
-        if (data.unread_count > 0) {
-            badge.textContent = data.unread_count;
-            badge.style.display = 'inline-flex';
-            // Sound + pulse only on polling (not first page load) when count grew
-            if (_lastUnreadCount >= 0 && data.unread_count > _lastUnreadCount) {
-                badge.classList.remove('nav-badge-pulse');
-                void badge.offsetWidth;
-                badge.classList.add('nav-badge-pulse');
-                try {
-                    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-                    if (ctx.state === 'suspended') await ctx.resume();
-                    const osc = ctx.createOscillator();
-                    const gain = ctx.createGain();
-                    osc.connect(gain);
-                    gain.connect(ctx.destination);
-                    osc.frequency.value = 880;
-                    osc.type = 'sine';
-                    gain.gain.value = 0.15;
-                    osc.start();
-                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-                    osc.stop(ctx.currentTime + 0.3);
-                } catch(e) {}
-            }
-            _lastUnreadCount = data.unread_count;
-        } else {
-            badge.style.display = 'none';
-            badge.textContent = '';
-            _lastUnreadCount = 0;
-        }
+        const grew = _lastAnnouncementCount >= 0 && data.unread_count > _lastAnnouncementCount;
+        _updateBadge(badge, data.unread_count, grew);
+        if (grew) playAnnouncementSound();
+        _lastAnnouncementCount = data.unread_count > 0 ? data.unread_count : 0;
     } catch(e) {}
 }
-// Initial check + poll every 15s
+
+// ── Unified notification polling ──────────────────
+
+let _lastTotalUnread = -1;
+let _lastNewLeads = -1;
+
+async function checkNotifications() {
+    try {
+        const resp = await fetch('/panel/notifications/status');
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        // Message badge on "Мои сделки"
+        const dealsBadge = document.getElementById('dealsBadge');
+        const msgGrew = _lastTotalUnread >= 0 && data.total_unread_messages > _lastTotalUnread;
+        _updateBadge(dealsBadge, data.total_unread_messages, msgGrew);
+
+        // Leads badge on "Главная"
+        const leadsBadge = document.getElementById('leadsBadge');
+        const leadsGrew = _lastNewLeads >= 0 && data.new_leads_count > _lastNewLeads;
+        _updateBadge(leadsBadge, data.new_leads_count, leadsGrew);
+
+        // Tier 1: New message → toast + sound
+        if (msgGrew) {
+            const newest = data.deals_with_unread[0];
+            if (newest) {
+                const cnt = data.total_unread_messages - _lastTotalUnread;
+                showNotification(
+                    `Новое сообщение (${cnt}) по сделке "${newest.product}"`,
+                    'info'
+                );
+                playMessageSound();
+            }
+        }
+        _lastTotalUnread = data.total_unread_messages;
+
+        // Tier 1: New lead → toast + sound
+        if (leadsGrew) {
+            const cnt = data.new_leads_count - _lastNewLeads;
+            showNotification(
+                `Новый лид в пуле (${cnt})`,
+                'success'
+            );
+            playLeadSound();
+        }
+        _lastNewLeads = data.new_leads_count;
+
+        // Dispatch event for child pages (chat.html)
+        window.dispatchEvent(new CustomEvent('arbion:notifications', {
+            detail: data
+        }));
+    } catch(e) {}
+}
+
+// Initial checks + polling
 checkUnreadAnnouncements();
 setInterval(checkUnreadAnnouncements, 15000);
+checkNotifications();
+setInterval(checkNotifications, 10000);
 </script>
 {% endblock %}

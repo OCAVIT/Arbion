@@ -276,6 +276,7 @@ class MessageResponse(BaseModel):
     reply_to_message_id: Optional[int] = None  # Telegram msg ID this replies to
     reply_to_content: Optional[str] = None  # Truncated content of replied message
     reply_to_sender_name: Optional[str] = None  # Who sent the replied message
+    read_at: Optional[datetime] = None  # When manager read this (NULL = unread)
 
     model_config = {"from_attributes": True}
 
@@ -328,6 +329,7 @@ class MessageResponse(BaseModel):
             reply_to_message_id=getattr(message, 'reply_to_message_id', None),
             reply_to_content=reply_info.get('content') if reply_info else None,
             reply_to_sender_name=reply_info.get('sender_name') if reply_info else None,
+            read_at=getattr(message, 'read_at', None),
         )
 
 

@@ -143,20 +143,6 @@ function formatDate(dateStr) {
     return new Date(dateStr).toLocaleDateString('ru-RU');
 }
 
-// Notification system
-function showNotification(message, type = 'info') {
-    const existing = document.querySelector('.notification');
-    if (existing) existing.remove();
-
-    const notification = document.createElement('div');
-    notification.className = `notification notification-${type}`;
-    notification.innerHTML = `
-        <span>${message}</span>
-        <button onclick="this.parentElement.remove()" class="notification-close">&times;</button>
-    `;
-    document.body.appendChild(notification);
-
-    setTimeout(() => notification.remove(), 5000);
-}
+// showNotification() inherited from base.html
 </script>
 {% endblock %}

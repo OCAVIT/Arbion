@@ -752,21 +752,7 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// Notification system
-function showNotification(message, type = 'info') {
-    const existing = document.querySelector('.notification');
-    if (existing) existing.remove();
-
-    const notification = document.createElement('div');
-    notification.className = `notification notification-${type}`;
-    notification.innerHTML = `
-        <span>${message}</span>
-        <button onclick="this.parentElement.remove()" class="notification-close">&times;</button>
-    `;
-    document.body.appendChild(notification);
-
-    setTimeout(() => notification.remove(), 5000);
-}
+// showNotification() inherited from base.html
 
 // Close modal on overlay click
 document.getElementById('skipModal').addEventListener('click', (e) => {

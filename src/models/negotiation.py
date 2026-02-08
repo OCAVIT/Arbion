@@ -165,6 +165,11 @@ class NegotiationMessage(Base):
         server_default=func.now(),
         nullable=False,
     )
+    read_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When the manager read this message (NULL = unread)",
+    )
 
     # Relationships
     negotiation: Mapped["Negotiation"] = relationship(

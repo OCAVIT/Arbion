@@ -220,8 +220,9 @@
 }
 
 .chat-tab-badge {
-    background: var(--bg-hover);
-    color: var(--text-secondary);
+    background: var(--danger, #ef4444);
+    color: #fff;
+    font-weight: 700;
     padding: 2px 8px;
     border-radius: 12px;
     font-size: 12px;
@@ -230,8 +231,28 @@
 }
 
 .chat-tab.active .chat-tab-badge {
-    background: rgba(255,255,255,0.2);
+    background: rgba(255,255,255,0.25);
     color: white;
+    font-weight: 700;
+}
+
+.chat-tab-badge.badge-zero {
+    background: var(--bg-hover);
+    color: var(--text-secondary);
+    font-weight: 400;
+}
+
+.chat-tab.active .chat-tab-badge.badge-zero {
+    background: rgba(255,255,255,0.15);
+    color: rgba(255,255,255,0.7);
+}
+
+/* Read indicator checkmark */
+.message-read-indicator {
+    font-size: 12px;
+    opacity: 0.7;
+    margin-left: 4px;
+    letter-spacing: -2px;
 }
 
 /* Chats Wrapper */
@@ -760,6 +781,8 @@ let dealClosed = false;
 document.addEventListener('DOMContentLoaded', () => {
     loadMessages();
     refreshInterval = setInterval(loadMessages, 5000);
+    // Mark initial active tab as read
+    markRead(activeChat);
 });
 
 async function loadMessages() {
@@ -802,12 +825,37 @@ async function loadMessages() {
     // Render seller messages
     const sellerMessages = data.seller_messages || [];
     renderMessages('sellerMessages', sellerMessages);
-    document.getElementById('sellerBadge').textContent = sellerMessages.length;
 
     // Render buyer messages
     const buyerMessages = data.buyer_messages || [];
     renderMessages('buyerMessages', buyerMessages);
-    document.getElementById('buyerBadge').textContent = buyerMessages.length;
+
+    // Unread counts (only non-manager messages without read_at)
+    const sellerUnread = sellerMessages.filter(m => m.role !== 'manager' && !m.read_at).length;
+    const buyerUnread = buyerMessages.filter(m => m.role !== 'manager' && !m.read_at).length;
+
+    const sellerBadgeEl = document.getElementById('sellerBadge');
+    const buyerBadgeEl = document.getElementById('buyerBadge');
+
+    if (sellerUnread > 0) {
+        sellerBadgeEl.textContent = sellerUnread;
+        sellerBadgeEl.classList.remove('badge-zero');
+    } else {
+        sellerBadgeEl.textContent = sellerMessages.length;
+        sellerBadgeEl.classList.add('badge-zero');
+    }
+
+    if (buyerUnread > 0) {
+        buyerBadgeEl.textContent = buyerUnread;
+        buyerBadgeEl.classList.remove('badge-zero');
+    } else {
+        buyerBadgeEl.textContent = buyerMessages.length;
+        buyerBadgeEl.classList.add('badge-zero');
+    }
+
+    // Auto mark-read for active tab if there are unread messages
+    if (activeChat === 'seller' && sellerUnread > 0) markRead('seller');
+    if (activeChat === 'buyer' && buyerUnread > 0) markRead('buyer');
 }
 
 function renderMessages(containerId, messages) {
@@ -825,12 +873,13 @@ function renderMessages(containerId, messages) {
         const replyRefHtml = renderReplyRef(msg);
         const replyBtnHtml = dealClosed ? '' :
             `<div class="message-actions"><button class="btn-reply" onclick="setReply('${chatTarget}', ${msg.id}, '${escapeAttr(msg.sender_name)}', '${escapeAttr(truncate(msg.content, 60))}')">&#8617; Ответить</button></div>`;
+        const readIndicator = msg.role === 'manager' ? '<span class="message-read-indicator">✓</span>' : '';
         return `
             <div class="message message-${msg.role}" data-msg-id="${msg.id}">
                 ${replyRefHtml}
                 <div class="message-header">
                     <span class="message-sender">${escapeHtml(msg.sender_name)}</span>
-                    <span class="message-time">${formatTime(msg.created_at)}</span>
+                    <span class="message-time">${formatTime(msg.created_at)}${readIndicator}</span>
                 </div>
                 <div class="message-content">${renderMessageContent(msg)}</div>
                 ${replyBtnHtml}
@@ -1044,6 +1093,14 @@ async function saveNotes() {
     }
 }
 
+async function markRead(target) {
+    try {
+        await fetch(`/panel/chat/${negotiationId}/mark-read?target=${target}`, {
+            method: 'POST'
+        });
+    } catch(e) {}
+}
+
 function switchChat(chat) {
     activeChat = chat;
 
@@ -1055,6 +1112,9 @@ function switchChat(chat) {
     // Update chat panels
     document.getElementById('sellerChat').classList.toggle('active', chat === 'seller');
     document.getElementById('buyerChat').classList.toggle('active', chat === 'buyer');
+
+    // Mark messages in switched-to tab as read
+    markRead(chat);
 }
 
 function getStatusLabel(status) {
@@ -1141,6 +1201,17 @@ document.getElementById('sellerMessageInput').addEventListener('keypress', (e) =
 
 document.getElementById('buyerMessageInput').addEventListener('keypress', (e) => {
     if (e.key === 'Enter') sendMessage('buyer');
+});
+
+// Listen for notifications from base.html polling
+window.addEventListener('arbion:notifications', (e) => {
+    const data = e.detail;
+    const currentDeal = data.deals_with_unread.find(
+        d => d.negotiation_id === negotiationId
+    );
+    if (currentDeal && (currentDeal.unread_seller > 0 || currentDeal.unread_buyer > 0)) {
+        loadMessages();
+    }
 });
 
 // Cleanup on page unload

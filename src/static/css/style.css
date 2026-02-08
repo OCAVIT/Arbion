@@ -1576,3 +1576,12 @@ textarea:focus {
     60% { transform: translateY(-50%) scale(0.9); }
     100% { transform: translateY(-50%) scale(1); }
 }
+
+/* Badge color variants */
+.nav-badge-messages {
+    background: #3b82f6;
+}
+
+.nav-badge-leads {
+    background: var(--success);
+}
