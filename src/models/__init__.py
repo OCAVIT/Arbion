@@ -5,6 +5,7 @@ All models are exported here for convenient imports:
     from src.models import User, DetectedDeal, Order, etc.
 """
 
+from src.models.announcement import Announcement, AnnouncementRead
 from src.models.audit import AuditAction, AuditLog
 from src.models.base import Base, BaseModel, TimestampMixin
 from src.models.chat import ChatSource, ChatStatus, MonitoredChat
@@ -24,6 +25,9 @@ from src.models.settings import SystemSetting
 from src.models.user import User, UserRole
 
 __all__ = [
+    # Announcement
+    "Announcement",
+    "AnnouncementRead",
     # Base
     "Base",
     "BaseModel",

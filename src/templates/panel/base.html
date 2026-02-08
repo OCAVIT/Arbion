@@ -28,6 +28,11 @@
                 <span class="nav-icon">💼</span>
                 <span>Мои сделки</span>
             </a>
+            <a href="/panel/announcements" class="nav-item {% if '/announcements' in request.url.path %}active{% endif %}" id="navAnnouncements">
+                <span class="nav-icon">📢</span>
+                <span>Важная информация</span>
+                <span class="nav-badge" id="announcementBadge" style="display:none;"></span>
+            </a>
 
             <div class="nav-section">Аккаунт</div>
             <a href="/panel/profile" class="nav-item {% if '/profile' in request.url.path %}active{% endif %}">
@@ -99,5 +104,50 @@ document.addEventListener('keydown', (e) => {
         closeSidebar();
     }
 });
+
+// Announcement unread badge
+let _lastUnreadCount = 0;
+async function checkUnreadAnnouncements() {
+    try {
+        const resp = await fetch('/panel/announcements/unread-count');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const badge = document.getElementById('announcementBadge');
+        if (!badge) return;
+        if (data.unread_count > 0) {
+            badge.textContent = data.unread_count;
+            badge.style.display = 'inline-flex';
+            // Play sound & animate on NEW unread (count increased)
+            if (data.unread_count > _lastUnreadCount && _lastUnreadCount >= 0) {
+                badge.classList.remove('nav-badge-pulse');
+                void badge.offsetWidth; // reflow
+                badge.classList.add('nav-badge-pulse');
+                if (_lastUnreadCount > 0 || document.visibilityState === 'visible') {
+                    try {
+                        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                        const osc = ctx.createOscillator();
+                        const gain = ctx.createGain();
+                        osc.connect(gain);
+                        gain.connect(ctx.destination);
+                        osc.frequency.value = 880;
+                        osc.type = 'sine';
+                        gain.gain.value = 0.15;
+                        osc.start();
+                        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+                        osc.stop(ctx.currentTime + 0.3);
+                    } catch(e) {}
+                }
+            }
+            _lastUnreadCount = data.unread_count;
+        } else {
+            badge.style.display = 'none';
+            badge.textContent = '';
+            _lastUnreadCount = 0;
+        }
+    } catch(e) {}
+}
+// Initial check + poll every 30s
+checkUnreadAnnouncements();
+setInterval(checkUnreadAnnouncements, 30000);
 </script>
 {% endblock %}

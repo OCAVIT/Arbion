@@ -1,0 +1,202 @@
+{% extends "panel/base.html" %}
+
+{% block page_title %}Важная информация{% endblock %}
+
+{% block header_actions %}
+<button onclick="markAllRead()" class="btn btn-sm btn-outline" id="markAllBtn" style="display:none;">Отметить все прочитанными</button>
+{% endblock %}
+
+{% block content %}
+<div class="announcements-page">
+    <div id="announcementsList" class="announcements-list">
+        <div class="loading-state">Загрузка...</div>
+    </div>
+</div>
+
+<style>
+.announcements-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.announcement-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 20px 24px;
+    transition: border-color 0.3s, box-shadow 0.3s;
+    position: relative;
+}
+
+.announcement-card.unread {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), inset 0 0 0 0 transparent;
+}
+
+.announcement-card.unread::before {
+    content: '';
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 10px;
+    height: 10px;
+    background: var(--accent);
+    border-radius: 50%;
+    animation: dotPulse 2s ease-in-out infinite;
+}
+
+@keyframes dotPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(1.2); }
+}
+
+.announcement-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.announcement-title {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.announcement-date {
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.announcement-updated {
+    font-size: 11px;
+    color: var(--warning);
+    margin-top: 2px;
+}
+
+.announcement-body {
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+}
+
+.announcement-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+}
+
+.btn-mark-read {
+    font-size: 12px;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: none;
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.btn-mark-read:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
+.loading-state, .empty-state {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 48px 20px;
+    font-size: 14px;
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', loadAnnouncements);
+
+async function loadAnnouncements() {
+    const container = document.getElementById('announcementsList');
+    try {
+        const resp = await fetch('/panel/announcements/list');
+        if (!resp.ok) throw new Error('Failed to load');
+        const items = await resp.json();
+
+        if (items.length === 0) {
+            container.innerHTML = '<div class="empty-state">Нет объявлений</div>';
+            document.getElementById('markAllBtn').style.display = 'none';
+            return;
+        }
+
+        const hasUnread = items.some(i => !i.is_read);
+        document.getElementById('markAllBtn').style.display = hasUnread ? 'inline-flex' : 'none';
+
+        container.innerHTML = items.map(item => {
+            const created = new Date(item.created_at).toLocaleString('ru-RU');
+            const updated = item.updated_at ? new Date(item.updated_at).toLocaleString('ru-RU') : null;
+            const unreadClass = item.is_read ? '' : 'unread';
+
+            return `
+                <div class="announcement-card ${unreadClass}" id="ann-${item.id}">
+                    <div class="announcement-header">
+                        <div>
+                            <div class="announcement-title">${escapeHtml(item.title)}</div>
+                            ${updated ? '<div class="announcement-updated">Обновлено: ' + updated + '</div>' : ''}
+                        </div>
+                        <div class="announcement-date">${created}</div>
+                    </div>
+                    <div class="announcement-body">${escapeHtml(item.content)}</div>
+                    ${!item.is_read ? `
+                    <div class="announcement-footer">
+                        <button class="btn-mark-read" onclick="markRead(${item.id})">Прочитано</button>
+                    </div>
+                    ` : ''}
+                </div>
+            `;
+        }).join('');
+    } catch(e) {
+        container.innerHTML = '<div class="empty-state">Ошибка загрузки</div>';
+    }
+}
+
+async function markRead(id) {
+    await fetch(`/panel/announcements/${id}/mark-read`, { method: 'POST' });
+    const card = document.getElementById('ann-' + id);
+    if (card) {
+        card.classList.remove('unread');
+        const footer = card.querySelector('.announcement-footer');
+        if (footer) footer.remove();
+    }
+    // Update badge count
+    if (typeof checkUnreadAnnouncements === 'function') checkUnreadAnnouncements();
+    // Hide mark-all button if no more unread
+    const remaining = document.querySelectorAll('.announcement-card.unread');
+    if (remaining.length === 0) {
+        document.getElementById('markAllBtn').style.display = 'none';
+    }
+}
+
+async function markAllRead() {
+    await fetch('/panel/announcements/mark-all-read', { method: 'POST' });
+    document.querySelectorAll('.announcement-card.unread').forEach(card => {
+        card.classList.remove('unread');
+        const footer = card.querySelector('.announcement-footer');
+        if (footer) footer.remove();
+    });
+    document.getElementById('markAllBtn').style.display = 'none';
+    if (typeof checkUnreadAnnouncements === 'function') checkUnreadAnnouncements();
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+{% endblock %}

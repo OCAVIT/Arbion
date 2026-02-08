@@ -1,0 +1,365 @@
+{% extends "admin/base.html" %}
+
+{% block page_title %}Важная информация{% endblock %}
+
+{% block header_actions %}
+<button onclick="openCreateModal()" class="btn btn-primary">+ Новое объявление</button>
+{% endblock %}
+
+{% block content %}
+<div class="announcements-page">
+    <div id="announcementsList" class="announcements-list">
+        <div class="loading-state">Загрузка...</div>
+    </div>
+</div>
+
+<!-- Create/Edit Modal -->
+<div class="modal-overlay" id="modalOverlay" style="display:none;" onclick="closeModal(event)">
+    <div class="modal-content" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3 id="modalTitle">Новое объявление</h3>
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="editId" value="">
+            <div class="form-group">
+                <label>Заголовок</label>
+                <input type="text" id="annTitle" maxlength="200" placeholder="Краткий заголовок...">
+            </div>
+            <div class="form-group">
+                <label>Содержание</label>
+                <textarea id="annContent" rows="8" placeholder="Текст объявления для менеджеров..."></textarea>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-outline" onclick="closeModal()">Отмена</button>
+            <button class="btn btn-primary" onclick="saveAnnouncement()">Сохранить</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.announcements-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.announcement-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 20px 24px;
+    transition: border-color 0.2s;
+}
+
+.announcement-card:hover {
+    border-color: var(--accent);
+}
+
+.announcement-card.inactive {
+    opacity: 0.5;
+}
+
+.announcement-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.announcement-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.announcement-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+}
+
+.announcement-date {
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.announcement-status {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+.announcement-status.active {
+    background: var(--success-soft);
+    color: var(--success);
+}
+
+.announcement-status.hidden {
+    background: var(--danger-soft);
+    color: var(--danger);
+}
+
+.announcement-body {
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    margin-bottom: 16px;
+}
+
+.announcement-actions {
+    display: flex;
+    gap: 8px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+}
+
+.announcement-updated {
+    font-size: 11px;
+    color: var(--warning);
+    margin-left: auto;
+    align-self: center;
+}
+
+/* Modal */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.modal-content {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-lg);
+    width: 100%;
+    max-width: 600px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h3 {
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 24px;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+
+.modal-close:hover {
+    color: var(--text-primary);
+}
+
+.modal-body {
+    padding: 20px 24px;
+    overflow-y: auto;
+}
+
+.modal-body .form-group {
+    margin-bottom: 16px;
+}
+
+.modal-body label {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.modal-body input[type="text"],
+.modal-body textarea {
+    width: 100%;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    color: var(--text-primary);
+    padding: 10px 14px;
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.modal-body input[type="text"]:focus,
+.modal-body textarea:focus {
+    border-color: var(--accent);
+}
+
+.modal-body textarea {
+    resize: vertical;
+    min-height: 120px;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 16px 24px;
+    border-top: 1px solid var(--border-color);
+}
+
+.loading-state, .empty-state {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 48px 20px;
+    font-size: 14px;
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', loadAnnouncements);
+
+async function loadAnnouncements() {
+    const container = document.getElementById('announcementsList');
+    try {
+        const resp = await fetch('/admin/announcements/list');
+        if (!resp.ok) throw new Error('Failed to load');
+        const items = await resp.json();
+
+        if (items.length === 0) {
+            container.innerHTML = '<div class="empty-state">Нет объявлений. Создайте первое объявление для менеджеров.</div>';
+            return;
+        }
+
+        container.innerHTML = items.map(item => {
+            const created = new Date(item.created_at).toLocaleString('ru-RU');
+            const updated = item.updated_at ? new Date(item.updated_at).toLocaleString('ru-RU') : null;
+            const statusClass = item.is_active ? 'active' : 'hidden';
+            const statusText = item.is_active ? 'Активно' : 'Скрыто';
+            const cardClass = item.is_active ? '' : 'inactive';
+
+            return `
+                <div class="announcement-card ${cardClass}">
+                    <div class="announcement-header">
+                        <div class="announcement-title">${escapeHtml(item.title)}</div>
+                        <div class="announcement-meta">
+                            <span class="announcement-status ${statusClass}">${statusText}</span>
+                            <span class="announcement-date">${created}</span>
+                        </div>
+                    </div>
+                    <div class="announcement-body">${escapeHtml(item.content)}</div>
+                    <div class="announcement-actions">
+                        <button class="btn btn-sm btn-outline" onclick="editAnnouncement(${item.id}, '${escapeAttr(item.title)}', '${escapeAttr(item.content)}')">Редактировать</button>
+                        <button class="btn btn-sm ${item.is_active ? 'btn-warning' : 'btn-success'}" onclick="toggleActive(${item.id}, ${!item.is_active})">${item.is_active ? 'Скрыть' : 'Показать'}</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteAnnouncement(${item.id})">Удалить</button>
+                        ${updated ? '<span class="announcement-updated">Обновлено: ' + updated + '</span>' : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    } catch(e) {
+        container.innerHTML = '<div class="empty-state">Ошибка загрузки</div>';
+    }
+}
+
+function openCreateModal() {
+    document.getElementById('editId').value = '';
+    document.getElementById('modalTitle').textContent = 'Новое объявление';
+    document.getElementById('annTitle').value = '';
+    document.getElementById('annContent').value = '';
+    document.getElementById('modalOverlay').style.display = 'flex';
+}
+
+function editAnnouncement(id, title, content) {
+    document.getElementById('editId').value = id;
+    document.getElementById('modalTitle').textContent = 'Редактировать объявление';
+    document.getElementById('annTitle').value = title;
+    document.getElementById('annContent').value = content;
+    document.getElementById('modalOverlay').style.display = 'flex';
+}
+
+function closeModal(event) {
+    if (event && event.target !== event.currentTarget) return;
+    document.getElementById('modalOverlay').style.display = 'none';
+}
+
+async function saveAnnouncement() {
+    const editId = document.getElementById('editId').value;
+    const title = document.getElementById('annTitle').value.trim();
+    const content = document.getElementById('annContent').value.trim();
+
+    if (!title || !content) {
+        alert('Заполните заголовок и содержание');
+        return;
+    }
+
+    const body = JSON.stringify({ title, content });
+    const headers = { 'Content-Type': 'application/json' };
+
+    let resp;
+    if (editId) {
+        resp = await fetch(`/admin/announcements/${editId}`, { method: 'PUT', headers, body });
+    } else {
+        resp = await fetch('/admin/announcements/create', { method: 'POST', headers, body });
+    }
+
+    if (resp.ok) {
+        closeModal();
+        loadAnnouncements();
+    } else {
+        const err = await resp.json().catch(() => ({}));
+        alert(err.detail || 'Ошибка сохранения');
+    }
+}
+
+async function toggleActive(id, newState) {
+    await fetch(`/admin/announcements/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: newState })
+    });
+    loadAnnouncements();
+}
+
+async function deleteAnnouncement(id) {
+    if (!confirm('Удалить объявление?')) return;
+    await fetch(`/admin/announcements/${id}`, { method: 'DELETE' });
+    loadAnnouncements();
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function escapeAttr(text) {
+    return text.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
+}
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeModal();
+});
+</script>
+{% endblock %}
