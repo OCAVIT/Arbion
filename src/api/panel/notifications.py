@@ -30,12 +30,15 @@ class DealUnreadInfo(BaseModel):
     unread_seller: int
     unread_buyer: int
     last_message_at: Optional[str] = None
+    last_sender_role: Optional[str] = None  # "buyer" or "seller"
+    last_message_preview: Optional[str] = None
 
 
 class NotificationStatusResponse(BaseModel):
     total_unread_messages: int
     deals_with_unread: list[DealUnreadInfo]
     new_leads_count: int
+    my_cold_deals_count: int = 0
 
 
 @router.get("/status", response_model=NotificationStatusResponse)
@@ -106,8 +109,9 @@ async def get_notification_status(
         ) or 0
 
         if unread_seller > 0 or unread_buyer > 0:
-            latest = await db.scalar(
-                select(func.max(NegotiationMessage.created_at))
+            # Get latest unread non-manager message for details
+            last_msg_result = await db.execute(
+                select(NegotiationMessage)
                 .where(
                     and_(
                         NegotiationMessage.negotiation_id == neg_id,
@@ -115,14 +119,31 @@ async def get_notification_status(
                         NegotiationMessage.read_at.is_(None),
                     )
                 )
+                .order_by(NegotiationMessage.created_at.desc())
+                .limit(1)
             )
+            last_msg = last_msg_result.scalar_one_or_none()
+
+            last_sender_role = None
+            last_preview = None
+            latest_at = None
+            if last_msg:
+                if last_msg.role == MessageRole.SELLER:
+                    last_sender_role = "seller"
+                elif last_msg.role == MessageRole.BUYER:
+                    last_sender_role = "buyer"
+                last_preview = (last_msg.content or "")[:80]
+                latest_at = last_msg.created_at.isoformat() if last_msg.created_at else None
+
             deals_with_unread.append(DealUnreadInfo(
                 deal_id=deal.id,
                 negotiation_id=neg_id,
                 product=deal.product,
                 unread_seller=unread_seller,
                 unread_buyer=unread_buyer,
-                last_message_at=latest.isoformat() if latest else None,
+                last_message_at=latest_at,
+                last_sender_role=last_sender_role,
+                last_message_preview=last_preview,
             ))
             total_unread += unread_seller + unread_buyer
 
@@ -138,8 +159,21 @@ async def get_notification_status(
         )
     ) or 0
 
+    # Count cold deals assigned to this manager (for real-time cold deal alerts)
+    my_cold = await db.scalar(
+        select(func.count())
+        .select_from(DetectedDeal)
+        .where(
+            and_(
+                DetectedDeal.manager_id == current_user.id,
+                DetectedDeal.status == DealStatus.COLD,
+            )
+        )
+    ) or 0
+
     return NotificationStatusResponse(
         total_unread_messages=total_unread,
         deals_with_unread=deals_with_unread,
         new_leads_count=new_leads,
+        my_cold_deals_count=my_cold,
     )

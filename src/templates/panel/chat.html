@@ -678,6 +678,33 @@
     border-radius: 4px;
 }
 
+/* Unread divider */
+.unread-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 8px 0;
+}
+.unread-divider::before,
+.unread-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #ef4444;
+    opacity: 0.4;
+}
+.unread-divider span {
+    font-size: 12px;
+    color: #ef4444;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+/* Unread message subtle highlight */
+.message-unread {
+    box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.25);
+}
+
 /* Empty/Loading states */
 .empty, .loading {
     text-align: center;
@@ -869,13 +896,29 @@ function renderMessages(containerId, messages) {
 
     const wasScrolledToBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 50;
 
-    container.innerHTML = messages.map(msg => {
+    // Find first unread non-manager message for "new messages" divider
+    let firstUnreadIdx = -1;
+    for (let i = 0; i < messages.length; i++) {
+        if (messages[i].role !== 'manager' && !messages[i].read_at) {
+            firstUnreadIdx = i;
+            break;
+        }
+    }
+
+    container.innerHTML = messages.map((msg, idx) => {
         const replyRefHtml = renderReplyRef(msg);
         const replyBtnHtml = dealClosed ? '' :
             `<div class="message-actions"><button class="btn-reply" onclick="setReply('${chatTarget}', ${msg.id}, '${escapeAttr(msg.sender_name)}', '${escapeAttr(truncate(msg.content, 60))}')">&#8617; Ответить</button></div>`;
         const readIndicator = msg.role === 'manager' ? '<span class="message-read-indicator">✓</span>' : '';
+        const isUnread = msg.role !== 'manager' && !msg.read_at;
+        const unreadClass = isUnread ? ' message-unread' : '';
+        // Insert "new messages" divider before first unread
+        const divider = (idx === firstUnreadIdx)
+            ? '<div class="unread-divider"><span>Новые сообщения</span></div>'
+            : '';
         return `
-            <div class="message message-${msg.role}" data-msg-id="${msg.id}">
+            ${divider}
+            <div class="message message-${msg.role}${unreadClass}" data-msg-id="${msg.id}">
                 ${replyRefHtml}
                 <div class="message-header">
                     <span class="message-sender">${escapeHtml(msg.sender_name)}</span>
@@ -1095,9 +1138,17 @@ async function saveNotes() {
 
 async function markRead(target) {
     try {
-        await fetch(`/panel/chat/${negotiationId}/mark-read?target=${target}`, {
+        const resp = await fetch(`/panel/chat/${negotiationId}/mark-read?target=${target}`, {
             method: 'POST'
         });
+        if (resp.ok) {
+            // Immediately update local UI to remove unread indicators
+            const containerId = target === 'seller' ? 'sellerMessages' : 'buyerMessages';
+            const container = document.getElementById(containerId);
+            container.querySelectorAll('.message-unread').forEach(el => el.classList.remove('message-unread'));
+            const divider = container.querySelector('.unread-divider');
+            if (divider) divider.remove();
+        }
     } catch(e) {}
 }
 

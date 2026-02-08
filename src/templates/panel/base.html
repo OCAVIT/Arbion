@@ -70,6 +70,90 @@
     </main>
 </div>
 
+<!-- Toast Notification Styles -->
+<style>
+.toast-container {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: 380px;
+    pointer-events: none;
+}
+.toast {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    background: var(--bg-card, #1e293b);
+    border: 1px solid var(--border-color, #334155);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    opacity: 0;
+    transform: translateX(100%);
+    transition: all 0.3s ease;
+    pointer-events: all;
+}
+.toast-visible {
+    opacity: 1;
+    transform: translateX(0);
+}
+.toast-icon {
+    font-size: 22px;
+    flex-shrink: 0;
+    line-height: 1.2;
+}
+.toast-content {
+    flex: 1;
+    min-width: 0;
+}
+.toast-title {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-primary, #f1f5f9);
+    margin-bottom: 2px;
+}
+.toast-body {
+    font-size: 13px;
+    color: var(--text-secondary, #94a3b8);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+.toast-close {
+    background: none;
+    border: none;
+    color: var(--text-muted, #64748b);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+.toast-close:hover {
+    color: var(--text-primary, #f1f5f9);
+}
+.toast-lead { border-left: 4px solid #f97316; }
+.toast-message { border-left: 4px solid #3b82f6; }
+.toast-announcement { border-left: 4px solid #eab308; }
+.toast-success { border-left: 4px solid #22c55e; }
+.toast-error { border-left: 4px solid #ef4444; }
+.toast-info { border-left: 4px solid #6366f1; }
+@media (max-width: 480px) {
+    .toast-container {
+        left: 8px;
+        right: 8px;
+        max-width: none;
+        top: 8px;
+    }
+}
+</style>
+
 <script>
 async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -108,35 +192,76 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ═══════════════════════════════════════════════════════
-// UNIFIED NOTIFICATION SYSTEM
+// UNIFIED NOTIFICATION SYSTEM v2
+// Rich toasts + 4 distinct sounds + browser notifications
 // ═══════════════════════════════════════════════════════
 
-// Toast notification (shared across all panel pages)
-function showNotification(message, type = 'info') {
-    const existing = document.querySelector('.notification');
-    if (existing) existing.remove();
+// ── Toast System ──────────────────────────────────
 
-    const notification = document.createElement('div');
-    notification.className = `notification notification-${type}`;
-    notification.innerHTML = `
-        <span>${message}</span>
-        <button onclick="this.parentElement.remove()" class="notification-close">&times;</button>
+let _toastContainer = null;
+function _getToastContainer() {
+    if (!_toastContainer) {
+        _toastContainer = document.createElement('div');
+        _toastContainer.className = 'toast-container';
+        document.body.appendChild(_toastContainer);
+    }
+    return _toastContainer;
+}
+
+/**
+ * Show a rich toast notification.
+ * @param {Object} opts
+ * @param {string} opts.title - Bold title line
+ * @param {string} [opts.body] - Secondary description
+ * @param {string} [opts.type] - 'lead'|'message'|'announcement'|'success'|'error'|'info'
+ * @param {string} [opts.href] - Navigate on click
+ * @param {number} [opts.duration=6000] - Auto-dismiss ms
+ */
+function showToast(opts) {
+    const container = _getToastContainer();
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${opts.type || 'info'}`;
+    const icons = {
+        lead: '\uD83D\uDD25', message: '\uD83D\uDCAC', announcement: '\uD83D\uDCE2',
+        success: '\u2705', error: '\u274C', info: '\u2139\uFE0F'
+    };
+    toast.innerHTML = `
+        <div class="toast-icon">${icons[opts.type] || '\u2139\uFE0F'}</div>
+        <div class="toast-content">
+            <div class="toast-title">${opts.title}</div>
+            ${opts.body ? `<div class="toast-body">${opts.body}</div>` : ''}
+        </div>
+        <button class="toast-close" onclick="event.stopPropagation();this.parentElement.remove()">&times;</button>
     `;
-    document.body.appendChild(notification);
-    setTimeout(() => notification.remove(), 5000);
+    if (opts.href) {
+        toast.style.cursor = 'pointer';
+        toast.addEventListener('click', (e) => {
+            if (!e.target.classList.contains('toast-close')) window.location.href = opts.href;
+        });
+    }
+    container.prepend(toast);
+    requestAnimationFrame(() => { requestAnimationFrame(() => toast.classList.add('toast-visible')); });
+    const dur = opts.duration || 6000;
+    setTimeout(() => {
+        toast.classList.remove('toast-visible');
+        setTimeout(() => toast.remove(), 300);
+    }, dur);
+}
+
+// Backwards-compat wrapper for child pages
+function showNotification(message, type = 'info') {
+    showToast({ title: message, type: type });
 }
 
 // ── Shared AudioContext ──────────────────────────────
 
 let _audioCtx = null;
 function _getAudioCtx() {
-    if (!_audioCtx) {
-        _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    }
+    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     return _audioCtx;
 }
 
-// Announcement sound: 880Hz sine, 300ms
+// SOUND 1: Announcement — 880Hz sine, 300ms (official, formal)
 async function playAnnouncementSound() {
     try {
         const ctx = _getAudioCtx();
@@ -144,64 +269,103 @@ async function playAnnouncementSound() {
         const now = ctx.currentTime;
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.frequency.value = 880;
-        osc.type = 'sine';
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.frequency.value = 880; osc.type = 'sine';
         gain.gain.setValueAtTime(0.15, now);
         gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
-        osc.start(now);
-        osc.stop(now + 0.3);
+        osc.start(now); osc.stop(now + 0.3);
     } catch(e) {}
 }
 
-// Message sound: two-tone C5+E5 (523Hz, 659Hz)
+// SOUND 2: New Message — two-tone C5+E5 sine (gentle, pleasant)
 async function playMessageSound() {
     try {
         const ctx = _getAudioCtx();
         if (ctx.state === 'suspended') await ctx.resume();
         const now = ctx.currentTime;
-        const osc1 = ctx.createOscillator();
-        const gain1 = ctx.createGain();
-        osc1.connect(gain1); gain1.connect(ctx.destination);
-        osc1.frequency.value = 523; osc1.type = 'sine';
-        gain1.gain.setValueAtTime(0.12, now);
-        gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
-        osc1.start(now); osc1.stop(now + 0.15);
-
-        const osc2 = ctx.createOscillator();
-        const gain2 = ctx.createGain();
-        osc2.connect(gain2); gain2.connect(ctx.destination);
-        osc2.frequency.value = 659; osc2.type = 'sine';
-        gain2.gain.setValueAtTime(0.12, now + 0.17);
-        gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
-        osc2.start(now + 0.17); osc2.stop(now + 0.32);
+        [523, 659].forEach((f, i) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.frequency.value = f; osc.type = 'sine';
+            const t = now + i * 0.17;
+            gain.gain.setValueAtTime(0.12, t);
+            gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+            osc.start(t); osc.stop(t + 0.15);
+        });
     } catch(e) {}
 }
 
-// Lead sound: ascending D5+G5 (587Hz, 784Hz), triangle wave
+// SOUND 3: New Lead / Cold Deal — 3-note ascending Eb5+G5+Bb5 sawtooth (urgent, bright)
 async function playLeadSound() {
     try {
         const ctx = _getAudioCtx();
         if (ctx.state === 'suspended') await ctx.resume();
         const now = ctx.currentTime;
-        const osc1 = ctx.createOscillator();
-        const gain1 = ctx.createGain();
-        osc1.connect(gain1); gain1.connect(ctx.destination);
-        osc1.frequency.value = 587; osc1.type = 'triangle';
-        gain1.gain.setValueAtTime(0.15, now);
-        gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
-        osc1.start(now); osc1.stop(now + 0.2);
-
-        const osc2 = ctx.createOscillator();
-        const gain2 = ctx.createGain();
-        osc2.connect(gain2); gain2.connect(ctx.destination);
-        osc2.frequency.value = 784; osc2.type = 'triangle';
-        gain2.gain.setValueAtTime(0.15, now + 0.22);
-        gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
-        osc2.start(now + 0.22); osc2.stop(now + 0.45);
+        [622, 784, 932].forEach((f, i) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.frequency.value = f; osc.type = 'sawtooth';
+            const t = now + i * 0.12;
+            gain.gain.setValueAtTime(0, t);
+            gain.gain.linearRampToValueAtTime(0.10, t + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+            osc.start(t); osc.stop(t + 0.18);
+        });
     } catch(e) {}
 }
+
+// SOUND 4: Browser/Off-screen Alert — pulsing square wave A4→A5→A4 (distinct urgency)
+async function playBrowserAlertSound() {
+    try {
+        const ctx = _getAudioCtx();
+        if (ctx.state === 'suspended') await ctx.resume();
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(440, now);
+        osc.frequency.linearRampToValueAtTime(880, now + 0.15);
+        osc.frequency.linearRampToValueAtTime(440, now + 0.3);
+        gain.gain.setValueAtTime(0.08, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+        osc.start(now); osc.stop(now + 0.35);
+    } catch(e) {}
+}
+
+// ── Browser Notifications API ─────────────────────
+
+let _notifPermission = ('Notification' in window) ? Notification.permission : 'denied';
+
+function _requestNotifPermission() {
+    if (!('Notification' in window)) return;
+    if (_notifPermission === 'default') {
+        Notification.requestPermission().then(p => { _notifPermission = p; });
+    }
+}
+
+function _showBrowserNotif(title, body, href, tag) {
+    if (_notifPermission !== 'granted' || document.hasFocus()) return;
+    try {
+        const n = new Notification(title, {
+            body: body,
+            tag: tag || ('arbion-' + Date.now()),
+            requireInteraction: false,
+        });
+        if (href) {
+            n.onclick = () => { window.focus(); window.location.href = href; n.close(); };
+        }
+        setTimeout(() => n.close(), 10000);
+    } catch(e) {}
+}
+
+// Request notification permission on first user interaction
+document.addEventListener('click', function _reqPerm() {
+    _requestNotifPermission();
+    document.removeEventListener('click', _reqPerm);
+}, { once: true });
 
 // ── Badge helper ──────────────────────────────────
 
@@ -221,7 +385,7 @@ function _updateBadge(el, count, playPulse) {
     }
 }
 
-// ── Announcement polling (existing, refactored) ────
+// ── Announcement polling ────────────────────────
 
 let _lastAnnouncementCount = -1;
 async function checkUnreadAnnouncements() {
@@ -232,7 +396,20 @@ async function checkUnreadAnnouncements() {
         const badge = document.getElementById('announcementBadge');
         const grew = _lastAnnouncementCount >= 0 && data.unread_count > _lastAnnouncementCount;
         _updateBadge(badge, data.unread_count, grew);
-        if (grew) playAnnouncementSound();
+        if (grew) {
+            playAnnouncementSound();
+            showToast({
+                title: 'Новое объявление',
+                body: 'Проверьте раздел "Важная информация"',
+                type: 'announcement',
+                href: '/panel/announcements',
+                duration: 8000,
+            });
+            if (!document.hasFocus()) {
+                _showBrowserNotif('Новое объявление', 'Проверьте "Важная информация"', '/panel/announcements', 'arbion-ann');
+                playBrowserAlertSound();
+            }
+        }
         _lastAnnouncementCount = data.unread_count > 0 ? data.unread_count : 0;
     } catch(e) {}
 }
@@ -241,6 +418,7 @@ async function checkUnreadAnnouncements() {
 
 let _lastTotalUnread = -1;
 let _lastNewLeads = -1;
+let _lastColdDeals = -1;
 
 async function checkNotifications() {
     try {
@@ -248,52 +426,95 @@ async function checkNotifications() {
         if (!resp.ok) return;
         const data = await resp.json();
 
-        // Message badge on "Мои сделки"
+        // Badge: unread messages on "Мои сделки"
         const dealsBadge = document.getElementById('dealsBadge');
         const msgGrew = _lastTotalUnread >= 0 && data.total_unread_messages > _lastTotalUnread;
         _updateBadge(dealsBadge, data.total_unread_messages, msgGrew);
 
-        // Leads badge on "Главная"
+        // Badge: leads on "Главная" (pool + my cold deals)
         const leadsBadge = document.getElementById('leadsBadge');
+        const totalLeads = data.new_leads_count + (data.my_cold_deals_count || 0);
         const leadsGrew = _lastNewLeads >= 0 && data.new_leads_count > _lastNewLeads;
-        _updateBadge(leadsBadge, data.new_leads_count, leadsGrew);
+        const coldGrew = _lastColdDeals >= 0 && (data.my_cold_deals_count || 0) > _lastColdDeals;
+        _updateBadge(leadsBadge, totalLeads, leadsGrew || coldGrew);
 
-        // Tier 1: New message → toast + sound
+        // ── New Message → rich toast + sound + browser notif ──
         if (msgGrew) {
-            const newest = data.deals_with_unread[0];
-            if (newest) {
-                const cnt = data.total_unread_messages - _lastTotalUnread;
-                showNotification(
-                    `Новое сообщение (${cnt}) по сделке "${newest.product}"`,
-                    'info'
-                );
-                playMessageSound();
+            const dealsWithNew = data.deals_with_unread;
+            for (const deal of dealsWithNew.slice(0, 3)) {
+                const sender = deal.last_sender_role === 'buyer' ? 'Покупатель' : 'Продавец';
+                showToast({
+                    title: `${sender} \u2022 ${deal.product}`,
+                    body: deal.last_message_preview || 'Новое сообщение',
+                    type: 'message',
+                    href: `/panel/chat/${deal.negotiation_id}`,
+                    duration: 8000,
+                });
+            }
+            playMessageSound();
+            if (!document.hasFocus()) {
+                const top = dealsWithNew[0];
+                if (top) {
+                    const s = top.last_sender_role === 'buyer' ? 'Покупатель' : 'Продавец';
+                    _showBrowserNotif(
+                        `${s} написал`,
+                        top.last_message_preview || `Сделка: ${top.product}`,
+                        `/panel/chat/${top.negotiation_id}`,
+                        'arbion-msg'
+                    );
+                    playBrowserAlertSound();
+                }
             }
         }
         _lastTotalUnread = data.total_unread_messages;
 
-        // Tier 1: New lead → toast + sound
+        // ── New Lead (Pool) → rich toast + sound + browser notif ──
         if (leadsGrew) {
             const cnt = data.new_leads_count - _lastNewLeads;
-            showNotification(
-                `Новый лид в пуле (${cnt})`,
-                'success'
-            );
+            showToast({
+                title: 'Новый лид в пуле',
+                body: `${cnt} ${cnt === 1 ? 'новая сделка' : 'новых сделок'} доступна`,
+                type: 'lead',
+                href: '/panel',
+                duration: 10000,
+            });
             playLeadSound();
+            if (!document.hasFocus()) {
+                _showBrowserNotif('Новый лид!', `${cnt} новых сделок в пуле`, '/panel', 'arbion-lead');
+                playBrowserAlertSound();
+            }
         }
         _lastNewLeads = data.new_leads_count;
 
-        // Dispatch event for child pages (chat.html)
+        // ── Cold Deal Assigned to Me → rich toast + sound + browser notif ──
+        if (coldGrew) {
+            const cnt = (data.my_cold_deals_count || 0) - _lastColdDeals;
+            showToast({
+                title: 'Назначена холодная сделка!',
+                body: `${cnt} ${cnt === 1 ? 'новый лид' : 'новых лидов'} назначено вам`,
+                type: 'lead',
+                href: '/panel/deals',
+                duration: 10000,
+            });
+            playLeadSound();
+            if (!document.hasFocus()) {
+                _showBrowserNotif('Назначена сделка!', `У вас ${cnt} новых холодных сделок`, '/panel/deals', 'arbion-cold');
+                playBrowserAlertSound();
+            }
+        }
+        _lastColdDeals = data.my_cold_deals_count || 0;
+
+        // Dispatch event for child pages (chat.html, deals.html)
         window.dispatchEvent(new CustomEvent('arbion:notifications', {
             detail: data
         }));
     } catch(e) {}
 }
 
-// Initial checks + polling
+// Initial checks + polling (7s for notifications, 15s for announcements)
 checkUnreadAnnouncements();
 setInterval(checkUnreadAnnouncements, 15000);
 checkNotifications();
-setInterval(checkNotifications, 10000);
+setInterval(checkNotifications, 7000);
 </script>
 {% endblock %}
