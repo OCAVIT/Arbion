@@ -105,8 +105,8 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
-// Announcement unread badge
-let _lastUnreadCount = 0;
+// Announcement unread badge (persist across page navigations via localStorage)
+let _lastUnreadCount = parseInt(localStorage.getItem('arbion_unread_ann') || '0', 10);
 async function checkUnreadAnnouncements() {
     try {
         const resp = await fetch('/panel/announcements/unread-count');
@@ -117,26 +117,24 @@ async function checkUnreadAnnouncements() {
         if (data.unread_count > 0) {
             badge.textContent = data.unread_count;
             badge.style.display = 'inline-flex';
-            // Play sound & animate on NEW unread (count increased)
-            if (data.unread_count > _lastUnreadCount && _lastUnreadCount >= 0) {
+            // Play sound & animate only when count ACTUALLY increased
+            if (data.unread_count > _lastUnreadCount) {
                 badge.classList.remove('nav-badge-pulse');
-                void badge.offsetWidth; // reflow
+                void badge.offsetWidth;
                 badge.classList.add('nav-badge-pulse');
-                if (_lastUnreadCount > 0 || document.visibilityState === 'visible') {
-                    try {
-                        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-                        const osc = ctx.createOscillator();
-                        const gain = ctx.createGain();
-                        osc.connect(gain);
-                        gain.connect(ctx.destination);
-                        osc.frequency.value = 880;
-                        osc.type = 'sine';
-                        gain.gain.value = 0.15;
-                        osc.start();
-                        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-                        osc.stop(ctx.currentTime + 0.3);
-                    } catch(e) {}
-                }
+                try {
+                    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.frequency.value = 880;
+                    osc.type = 'sine';
+                    gain.gain.value = 0.15;
+                    osc.start();
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+                    osc.stop(ctx.currentTime + 0.3);
+                } catch(e) {}
             }
             _lastUnreadCount = data.unread_count;
         } else {
@@ -144,6 +142,7 @@ async function checkUnreadAnnouncements() {
             badge.textContent = '';
             _lastUnreadCount = 0;
         }
+        localStorage.setItem('arbion_unread_ann', String(_lastUnreadCount));
     } catch(e) {}
 }
 // Initial check + poll every 30s
